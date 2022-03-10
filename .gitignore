@@ -1,0 +1,6 @@
+.DS_Store
+riscv-tests/
+libelf/
+.vscode/
+core
+*.o
