@@ -23,7 +23,7 @@ void write_csr(int index, int32_t value);
 
 #define LUI    0b0110111
 #define AUIPC  0b0010111
-#define IMM_OP   0b0010011
+#define OP_IM   0b0010011
     #define ADDI  0b000
     #define SLTI  0b010
     #define SLTIU 0b011
@@ -69,6 +69,9 @@ void write_csr(int index, int32_t value);
     #define BGEU 0b111
 #define FENCE  0b0001111
 
+#define extract(value, start, end) ((value >> start) & ((0x1 << (end - start + 1)) - 1))
+#define sign_extend(value, width) (((int32_t) value << (32 - width)) >> (32 - width))
+
 int steps = 0;
 int8_t* mem = NULL; // based at 0x80000000
 uint32_t PC = 0;
@@ -108,11 +111,11 @@ void write_csr(int index, int32_t value) {
     _csr[index] = value;
 }
 
-uint32_t write_mem(uint32_t addr, uint32_t value) {
+void write_mem(uint32_t addr, uint32_t value) {
 
 }
 
-uint32_t read_mem_w(uint32_t addr) {
+int32_t read_mem_w(uint32_t addr) {
     addr -= BASE_ADDR;
     if (addr > MEMORY_SIZE-sizeof(uint32_t) || addr < 0) {
         panic("memory address 0x%08x out of bounds", addr);
@@ -121,19 +124,21 @@ uint32_t read_mem_w(uint32_t addr) {
     return value;
 }
 
-uint16_t read_mem_h(uint32_t addr) {
-    if (addr - BASE_ADDR > MEMORY_SIZE-sizeof(uint16_t) || addr - BASE_ADDR < 0) {
+int16_t read_mem_h(uint32_t addr) {
+    addr -= BASE_ADDR;
+    if (addr > MEMORY_SIZE-sizeof(uint16_t) || addr < 0) {
         panic("memory address 0x%08x out of bounds", addr);
     }
-    uint16_t value = *(uint16_t*) (mem + addr - BASE_ADDR);
+    uint16_t value = *(uint16_t*) (mem + addr);
     return value;
 }
 
-uint8_t read_mem_b(uint32_t addr) {
-    if (addr - BASE_ADDR > MEMORY_SIZE-sizeof(uint8_t) || addr - BASE_ADDR < 0) {
+int8_t read_mem_b(uint32_t addr) {
+    addr -= BASE_ADDR;
+    if (addr > MEMORY_SIZE-sizeof(uint8_t) || addr < 0) {
         panic("memory address 0x%08x out of bounds", addr);
     }
-    uint8_t value = *(uint8_t*) (mem + addr - BASE_ADDR);
+    uint8_t value = *(uint8_t*) (mem + addr);
     return value;
 }
 
@@ -147,16 +152,12 @@ void dump_all() {
     for (int row = 0; row < 8; row++) {
         for (int col = 0; col < 4; col++) {
             int i = 4*row+col;
-            if (i == -1) {
-                printf(GREEN "[  PC]" RESET);
-            } else {
-                printf("[ x%02d]", i);
-            }
+            printf(" x%02d:", i);
             if (read_reg(i))
                 printf(BOLDRED " %08x " RESET, read_reg(i));
             else
                 printf(RED " %08x " RESET, read_reg(i));
-            printf(BLUE " (%d) " RESET, read_reg(i));
+            printf(BLUE "%-11d " RESET, read_reg(i));
         }
         printf("\n");
     }
@@ -187,43 +188,73 @@ const char* as_binary_str(uint32_t value, int len) {
 void step() {
     // FETCH
     uint32_t inst = read_mem_w(PC);
-    bool jumped = false;
     
     dump_all();
     printf("IFETCH: %s  0x%08x   PC: %08x\n", as_binary_str(inst, 32), inst, PC);
 
     // DECODE
-    uint8_t opcode = inst & 0x7F;
-    uint8_t rd   = inst >> 7  & 0x1F;
-    uint8_t func = inst >> 12 & 0x7;
-    uint8_t rs1  = inst >> 15 & 0x1F;
-    uint8_t rs2  = inst >> 20 & 0x1F;
+    uint8_t opcode = extract(inst, 0, 6);
+    uint8_t rd   = extract(inst, 7, 11);
+    uint8_t funct3 = extract(inst, 12, 14);
     
-    printf("opcode: %d rs1: %d rs2: %d\n", opcode, rs1, rs2);
+    uint8_t rs1  = extract(inst, 15, 19);
+    uint8_t rs2  = extract(inst, 20, 24);
+    uint8_t shamt = rs2;
+    // I-Type
+    int32_t i_imm = extract(inst, 20, 31);
+    int32_t i_simm = sign_extend(i_imm, 12);
+    // R-Type
+    //uint8_t r_imm = extract(inst, 25, 31);
+    uint8_t funct7 = extract(inst, 25, 31);
+    // B-Type
+    uint32_t b_imm = \
+        extract(inst, 8,  11) << 1 |
+        extract(inst, 25, 30) << 5 |
+        extract(inst, 7,  7)  << 11 |
+        extract(inst, 31, 31) << 12;
+    int32_t b_simm = sign_extend(b_imm, 13);
+    // J-Type
+    uint32_t j_imm = \
+        extract(inst, 21, 30) << 1 |
+        extract(inst, 20, 20) << 11 |
+        extract(inst, 12, 19) << 19 |
+        extract(inst, 31, 31) << 20;
+    int32_t j_simm = sign_extend(j_imm, 21);
+    // U-Type
+    uint32_t u_imm = extract(inst, 12, 31);
+
+    printf("opcode: %d rd: %d rs1: %d rs2: %d funct3: %d\n", opcode, rd, rs1, rs2, funct3);
+
+    // register preload
+    int32_t rs1_was = read_reg(rs1);
+    int32_t rs2_was = read_reg(rs2);
+    int32_t pc_was = PC;
+
+    // new values
+    int32_t new_pc = PC + 4;
+    int32_t rd_val;
+
+    // flags
+    bool write_rd = false;
 
     // EXECUTE
     switch (opcode) {
         case LOAD: {
             // I-type
-            int32_t offset = ((int32_t) inst) >> 20;
-            printf("LOAD offset is %d\n", offset);
-            uint32_t addr = read_reg(rs1) + offset;
-            
-            switch (func) {
+            switch (funct3) {
                 case LW:
                     printf("LW\n");
-                    write_reg(rd, read_mem_w(addr));
+                    write_reg(rd, read_mem_w(rs1_was + i_simm));
                     break;
                 
                 case LH:
                     printf("LH\n");
-                    // must cast *from* signed int for sign extension
-                    write_reg(rd, (int16_t) read_mem_h(addr));
+                    write_reg(rd, read_mem_h(rs1_was + i_simm)); // will sign extend
                     break;
 
                 case LB:
                     printf("LB\n");
-                    write_reg(rd, (int8_t) read_mem_b(addr));
+                    write_reg(rd, read_mem_b(rs1_was + i_simm)); // will sign extend
                     break;
             }
             break;
@@ -236,124 +267,118 @@ void step() {
         }
 
         case OP: {
-            //printf("OP\n");
             // R-Type operations
-            uint8_t func7 = inst >> 25 & 0x7F;
-
-            switch (func7) {
+            write_rd = true;
+            switch (funct3) {
                 case ADD_SUB:
-                    if (func7 == 0b0100000)
-                        write_reg(rd, read_reg(rs1) - read_reg(rs2));
+                    if (funct7 == 0b0100000)
+                        rd_val = rs1_was - rs2_was;
                     else
-                        write_reg(rd, read_reg(rs1) + read_reg(rs2));
+                        rd_val = rs1_was + rs2_was;
                     break;
                 case SLL:
-                    panic("tbi");
+                    rd_val = rs1_was << (rs2_was & 0x1F);
                     break;
                 case SLT:
-                    panic("tbi");
+                    rd_val = rs1_was < rs2_was ? 1 : 0;
                     break;
                 case SLTU:
-                    panic("tbi");
+                    rd_val = ((int32_t) rs1_was) < ((int32_t) rs2_was) ? 1 : 0;
                     break;
                 case XOR:
-                    panic("tbi");
+                    rd_val = rs1_was ^ rs2_was;
                     break;
                 case SRL_SRA:
-                    panic("tbi");
-                    if (func7 == 0b0100000) {
-                        // sra
+                    if (funct7 == 0b0100000) {
+                        rd_val = ((int32_t) rs1_was) >> (rs2_was & 0x1F); // arithmetic (signed) shift
+                    } else {
+                        rd_val = rs1_was >> (rs2_was & 0x1F);
                     }
                     break;
-                
                 case OR:
-                    panic("tbi");
+                    rd_val = rs1_was | rs2_was;
                     break;
                 case AND:
-                    panic("tbi");
+                    rd_val = rs1_was & rs2_was;
                     break;
                 
                 default:
-                    panic("unknown OP func7");
+                    panic("unknown OP funct3");
             }
             break;
         }
 
-        case IMM_OP: {
-            //printf("IMM_OP (func %s)\n", as_binary_str(func, 3));
-            int32_t imm = ((int32_t) inst) >> 20;
-            switch (func) {
+        case OP_IM: {
+            // I-type
+            write_rd = true;
+            switch (funct3) {
                 case ADDI: {
                     // TODO/CHECK "Arithmetic overflow is ignored and the result
                     // is simply the low XLEN bits of the result
-                    int64_t temp = read_reg(rs1);
-                    temp += imm;
-                    write_reg(rd, temp);
+                    rd_val = rs1_was + i_simm;
                     break;
                 }
                 
                 case SLTI:
-                    write_reg(rd, read_reg(rs1) < imm ? 1 : 0);
+                    rd_val = rs1_was < i_simm ? 1 : 0;
                     break;
                 
                 case SLTIU:
-                    write_reg(rd, ((uint32_t) read_reg(rs1)) < ((uint32_t) imm) ? 1 : 0);
+                    rd_val = ((uint32_t) rs1_was) < i_imm ? 1 : 0;
                     break;
                 
                 case XORI:
-                    write_reg(rd, read_reg(rs1) ^ imm);
+                    rd_val = rs1_was ^ i_imm;
                     break;
                 
                 case ORI:
-                    write_reg(rd, read_reg(rs1) | imm);
+                    rd_val = rs1_was | i_imm;
                     break;
 
                 case ANDI:
-                    write_reg(rd, read_reg(rs1) & imm);
+                    rd_val = rs1_was & i_imm;
                     break;
                 
                 case SLLI:
-                    write_reg(rd, read_reg(rs1) << (imm & 0x1F));
+                    rd_val = rs1_was << shamt;
                     break;
                 
                 case SRLI_SRAI:
-                    if (imm & 0x800) {
-                        write_reg(rd, read_reg(rs1) >> (imm & 0x1F));
-                    } else {
-                        write_reg(rd, ((uint32_t) read_reg(rs1)) >> (imm & 0x1F));
-                    }
+                    if (i_imm & 0b010000000000)
+                        rd_val = rs1_was >> shamt; // signed
+                    else
+                        rd_val = ((uint32_t) rs1_was) >> shamt;
                     break;
                 
                 default:
-                    panic("Unknown IMM_OP func");
+                    panic("Unknown OP_IM func");
             }
             break;
         }
 
-        case LUI: {
+        case LUI:
+            // U-Type
             printf("LUI\n");
-            uint32_t imm = inst & 0xFFFFF000;
-            printf("imm 0x%05x\n", imm);
-            write_reg(rd, imm);
+            write_rd = true;
+            rd_val = u_imm << 12;
             break;
-        }
 
-        case AUIPC: {
-            int32_t imm = inst & 0xFFFFF000;
-            write_reg(rd, PC + imm);
+        case AUIPC:
+            // U-Type
+            printf("AUIPC u_imm is\n");
+            write_rd = true;
+            rd_val = pc_was + (u_imm << 12);
             break;
-        }
 
         case JALR: {
             printf("JALR\n");
+            write_rd = true;
             // I-Type encoding
-            uint32_t imm = ((int32_t) inst) >> 20;
-            uint32_t target = (read_reg(rs1) + imm) & (0xFFFFFFFF << 1);
             
             // FIXME not sure if value in this rg is supposed to be updated
             //read_reg(rs1) = target;
-            write_reg(rd, PC + 4);
-            update_pc(target);
+            rd_val = new_pc;
+            new_pc = (rs1_was + i_simm) & (0xFFFFFFFF << 1);
 
             // TODO
             //
@@ -363,6 +388,7 @@ void step() {
 
         case JAL: {
             printf("JAL\n");
+            write_rd = true;
 
             // imm[ 20 |   10:1 | 11 |  19:12 ]  [other 12 bits of instr]
             //     1bit  10bits  1bit   8bits   = 20 bits
@@ -377,12 +403,10 @@ void step() {
 
             offset = offset << 1; // see above, starts at bit 1 (multiple of 2 bytes)
 
-            printf("\timm was 0x%08x, decoded to 0x%08x\n", imm, offset);
+            printf("\timm was 0x%08x, decoded to 0x%08x\n", j_imm, j_simm);
 
-            write_reg(rd, PC + 4);
-            update_pc(PC + offset);
-            jumped = true;
-
+            rd_val = new_pc;
+            new_pc = pc_was + offset;
             break;
         }
 
@@ -391,7 +415,7 @@ void step() {
             
             //printf("SYSTEM func %s\n", as_binary_str(func, 3));
 
-            switch (func) {
+            switch (funct3) {
                 case CSRRW: {
                     printf("CSRRW csr: %d rs1: %d rd: %d\n", imm, rs1, rd);
                     if (rd != 0)
@@ -429,24 +453,25 @@ void step() {
                     if (imm == 1) {
                         panic("EBREAK");
                     } else if (imm == 0) {
-                        printf("ECALL\n");
+                        //printf("ECALL\n");
                         if (read_reg(REG_A0)) {
                             int failed_test_num = read_reg(REG_A0) >> 1;
+                            dump_all();
                             fprintf(stderr, CYAN "  Test %d failed\n" RESET, failed_test_num);
                             exit(-1);
                         } else {
-                            printf(GREEN "Tests Passed!" RESET);
+                            printf(GREEN "Tests Passed!\n" RESET);
                             exit(0);
                         }
                         
                     } else {
-                        printf(RED "unknown ECALL_EBREAK func: %s\n" RESET, as_binary_str(func, 3) );
+                        printf(RED "unknown ECALL_EBREAK func: %s\n" RESET, as_binary_str(funct3, 3) );
                     }
                     break;
                 }
 
                 default:
-                    printf(RED "unknown SYSTEM func: %s" RESET, as_binary_str(func, 3) );
+                    printf(RED "unknown SYSTEM func: %s" RESET, as_binary_str(funct3, 3) );
             }
 
             break;
@@ -455,38 +480,31 @@ void step() {
         case BRANCH: {
             // B-Type instruction
             bool jump = false;
-            uint32_t offset =
-                ((inst >> 8)  & 0xF) << 1  |
-                ((inst >> 25) & 0x3F) << 5 |
-                ((inst >> 7)  & 0x1) << 11 |
-                ((inst >> 31) & 0x1) << 12;
-            // sign extend 13 value
-            int32_t s_offset = ((int32_t) offset << (32-13)) >> (32-13);
-            printf("BRANCH func %s offset is %d, s_offset is %d\n", as_binary_str(func, 3), offset, s_offset);
+            printf("BRANCH func %s offset is %d, s_offset is %d\n", as_binary_str(funct3, 3), b_imm, b_simm);
 
-            switch (func) {
+            switch (funct3) {
                 case BEQ:
-                    jump = read_reg(rs1) == read_reg(rs2);
+                    jump = rs1_was == rs2_was;
                     break;
 
                 case BNE:
-                    jump = read_reg(rs1) != read_reg(rs2);
+                    jump = rs1_was != rs2_was;
                     break;
                 
                 case BLT:
-                    jump = read_reg(rs1) < read_reg(rs2);
+                    jump = rs1_was < rs2_was;
                     break;
                 
                 case BLTU:
-                    jump = ((uint32_t) read_reg(rs1)) < ((uint32_t) read_reg(rs2));
+                    jump = ((uint32_t) rs1_was) < ((uint32_t) rs2_was);
                     break;
                 
                 case BGE:
-                    jump = read_reg(rs1) > read_reg(rs2);
+                    jump = rs1_was > rs2_was;
                     break;
 
                 case BGEU:
-                    jump = ((uint32_t) read_reg(rs1)) > ((uint32_t) read_reg(rs2));
+                    jump = ((uint32_t) rs1_was) > ((uint32_t) rs2_was);
                     break;
 
                 default:
@@ -494,27 +512,24 @@ void step() {
             }
 
             if (jump) {
-                //printf("   -> Branching with offset %d\n", s_offset);
-                if (!s_offset) panic("jump offset zero");
-                update_pc(PC + s_offset);
-                jumped = true;
+                if (!b_simm) panic("jump offset zero");
+                new_pc = pc_was + b_simm;
             }
             break;
         }
 
-        case FENCE: {
-            printf("FENCE\n");
-            break;;
-        }
+        case FENCE:
+            break;
 
         default:
-            panic("unknown opcode %s\n", as_binary_str(opcode, 7));
+            panic("expected opcode %s\n", as_binary_str(opcode, 7));
             break;
     }
 
-    if (!jumped) {
-        update_pc(PC + 4); // 32 bits
-    }
+    // Update registers
+    update_pc(new_pc);
+    if (write_rd)
+        write_reg(rd, rd_val);
 }
 
 int32_t main(int argc, char *argv[]) {
@@ -541,5 +556,5 @@ int32_t main(int argc, char *argv[]) {
         }
     }
 
-    while(1) step();
+    while(true) step();
 }

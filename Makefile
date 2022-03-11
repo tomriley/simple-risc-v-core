@@ -8,7 +8,7 @@ clean:
 	rm core *.o
 
 run: core
-	./core riscv-tests/isa/rv32ui-p-lw
+	./core riscv-tests/isa/rv32ui-p-auipc
 
 deps:
 	@if [ ! -d libelf ]; then git clone -q https://github.com/tomriley/libelf; cd libelf; make; cd libbele; make; fi
