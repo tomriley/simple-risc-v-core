@@ -10,6 +10,13 @@
 void panic(const char *fmt, ...);
 void dump_all();
 
+void update_pc(uint32_t value);
+
+int32_t read_reg(int index);
+void write_reg(int index, int32_t value);
+int32_t read_csr(int index);
+void write_csr(int index, int32_t value);
+
 #define MEMORY_SIZE 65536
 #define BASE_ADDR 0x80000000
 #define REG_A0 10 // failing test number is loaded into here
@@ -32,11 +39,20 @@ void dump_all();
     #define SLTU 0b011
     #define XOR 0b100
     #define SRL_SRA 0b101
-    #define OR 0b110
+    #define OR  0b110
     #define AND 0b111
 #define JAL    0b1101111
 #define JALR   0b1100111
 #define LOAD   0b0000011
+    #define LB  0b000
+    #define LH  0b001
+    #define LW  0b010
+    #define LBU 0b100
+    #define LHU 0b101
+#define STORE  0b0100011
+    #define SB  0b000
+    #define SH  0b001
+    #define SW  0b010
 #define STORE  0b0100011
 #define SYSTEM 0b1110011
     #define CSRRW 0b001
@@ -92,13 +108,32 @@ void write_csr(int index, int32_t value) {
     _csr[index] = value;
 }
 
-uint32_t read_mem(uint32_t addr) {
-    //printf("read_mem(0x%08x => 0x%08x)\n", addr, addr - BASE_ADDR);
-    if (addr - BASE_ADDR >= MEMORY_SIZE || addr - BASE_ADDR < 0) {
-        dump_all();
+uint32_t write_mem(uint32_t addr, uint32_t value) {
+
+}
+
+uint32_t read_mem_w(uint32_t addr) {
+    addr -= BASE_ADDR;
+    if (addr > MEMORY_SIZE-sizeof(uint32_t) || addr < 0) {
         panic("memory address 0x%08x out of bounds", addr);
     }
-    uint32_t value = *(uint32_t*) (mem + addr - BASE_ADDR);
+    uint32_t value = *(uint32_t*)(mem + addr);
+    return value;
+}
+
+uint16_t read_mem_h(uint32_t addr) {
+    if (addr - BASE_ADDR > MEMORY_SIZE-sizeof(uint16_t) || addr - BASE_ADDR < 0) {
+        panic("memory address 0x%08x out of bounds", addr);
+    }
+    uint16_t value = *(uint16_t*) (mem + addr - BASE_ADDR);
+    return value;
+}
+
+uint8_t read_mem_b(uint32_t addr) {
+    if (addr - BASE_ADDR > MEMORY_SIZE-sizeof(uint8_t) || addr - BASE_ADDR < 0) {
+        panic("memory address 0x%08x out of bounds", addr);
+    }
+    uint8_t value = *(uint8_t*) (mem + addr - BASE_ADDR);
     return value;
 }
 
@@ -151,21 +186,11 @@ const char* as_binary_str(uint32_t value, int len) {
 
 void step() {
     // FETCH
-    uint32_t inst = read_mem(PC);
+    uint32_t inst = read_mem_w(PC);
     bool jumped = false;
     
-    //dump_all();
-
+    dump_all();
     printf("IFETCH: %s  0x%08x   PC: %08x\n", as_binary_str(inst, 32), inst, PC);
-
-    if (inst == 0) {
-        panic("illegal instruction (all zeros)");
-    }
-
-    if ((inst & 0x3) != 0x3) {
-        // all 32 bit instructions have lowest 2 bits set to 1
-        panic("unsupported compressed instruction");
-    }
 
     // DECODE
     uint8_t opcode = inst & 0x7F;
@@ -174,16 +199,41 @@ void step() {
     uint8_t rs1  = inst >> 15 & 0x1F;
     uint8_t rs2  = inst >> 20 & 0x1F;
     
-    //printf("opcode: %d rs1: %d rs2: %d\n", opcode, rs1, rs2);
+    printf("opcode: %d rs1: %d rs2: %d\n", opcode, rs1, rs2);
 
+    // EXECUTE
     switch (opcode) {
-        /*case LOAD: {
-            printf("LOAD\n");
+        case LOAD: {
             // I-type
-            int32_t offset = ((int32_t) opcode) >> 20; // sign extended offset
+            int32_t offset = ((int32_t) inst) >> 20;
+            printf("LOAD offset is %d\n", offset);
+            uint32_t addr = read_reg(rs1) + offset;
+            
+            switch (func) {
+                case LW:
+                    printf("LW\n");
+                    write_reg(rd, read_mem_w(addr));
+                    break;
+                
+                case LH:
+                    printf("LH\n");
+                    // must cast *from* signed int for sign extension
+                    write_reg(rd, (int16_t) read_mem_h(addr));
+                    break;
 
-            //read_reg(rs1) + offset
-        }*/
+                case LB:
+                    printf("LB\n");
+                    write_reg(rd, (int8_t) read_mem_b(addr));
+                    break;
+            }
+            break;
+        }
+        
+        case STORE: {
+            // S-type
+
+            break;
+        }
 
         case OP: {
             //printf("OP\n");
@@ -192,7 +242,6 @@ void step() {
 
             switch (func7) {
                 case ADD_SUB:
-                    printf("ADD_SUB");
                     if (func7 == 0b0100000)
                         write_reg(rd, read_reg(rs1) - read_reg(rs2));
                     else
@@ -234,25 +283,24 @@ void step() {
             //printf("IMM_OP (func %s)\n", as_binary_str(func, 3));
             int32_t imm = ((int32_t) inst) >> 20;
             switch (func) {
-                case ADDI:
-                    printf("ADDI\n");
-                    // ADDI adds the sign-extended 12-bit immediate to register rs1. Arithmetic overflow is ignored and the result is simply the low XLEN bits of the result. ADDI rd, rs1, 0 is used to implement the MV rd, rs1 assembler pseudoinstruction.
-                    write_reg(rd, read_reg(rs1) + imm);
+                case ADDI: {
+                    // TODO/CHECK "Arithmetic overflow is ignored and the result
+                    // is simply the low XLEN bits of the result
+                    int64_t temp = read_reg(rs1);
+                    temp += imm;
+                    write_reg(rd, temp);
                     break;
+                }
                 
                 case SLTI:
-                    printf("SLTI\n");
-                    // SLTI (set less than immediate) places the value 1 in register rd if register rs1 is less than the sign- extended immediate when both are treated as signed numbers, else 0 is written to rd. SLTIU is similar but compares the values as unsigned numbers (i.e., the immediate is first sign-extended to XLEN bits then treated as an unsigned number). Note, SLTIU rd, rs1, 1 sets rd to 1 if rs1 equals zero, otherwise sets rd to 0 (assembler pseudoinstruction SEQZ rd, rs).
                     write_reg(rd, read_reg(rs1) < imm ? 1 : 0);
                     break;
                 
                 case SLTIU:
-                    printf("SLTIU\n");
                     write_reg(rd, ((uint32_t) read_reg(rs1)) < ((uint32_t) imm) ? 1 : 0);
                     break;
                 
                 case XORI:
-                    printf("XORI\n");
                     write_reg(rd, read_reg(rs1) ^ imm);
                     break;
                 
@@ -265,13 +313,11 @@ void step() {
                     break;
                 
                 case SLLI:
-                    // bottom 5 bits are shift amount
                     write_reg(rd, read_reg(rs1) << (imm & 0x1F));
                     break;
                 
                 case SRLI_SRAI:
-                    if (inst >> 31 == 0x1) {
-                        // arithmetic (sign-extended shift)
+                    if (imm & 0x800) {
                         write_reg(rd, read_reg(rs1) >> (imm & 0x1F));
                     } else {
                         write_reg(rd, ((uint32_t) read_reg(rs1)) >> (imm & 0x1F));
@@ -279,7 +325,7 @@ void step() {
                     break;
                 
                 default:
-                    panic("Unknown IMM_OP func 0x%1x", func);
+                    panic("Unknown IMM_OP func");
             }
             break;
         }
@@ -287,12 +333,12 @@ void step() {
         case LUI: {
             printf("LUI\n");
             uint32_t imm = inst & 0xFFFFF000;
+            printf("imm 0x%05x\n", imm);
             write_reg(rd, imm);
             break;
         }
 
         case AUIPC: {
-            printf("AUIPC\n");
             int32_t imm = inst & 0xFFFFF000;
             write_reg(rd, PC + imm);
             break;
@@ -384,11 +430,12 @@ void step() {
                         panic("EBREAK");
                     } else if (imm == 0) {
                         printf("ECALL\n");
-                        int failed_test_num = read_reg(REG_A0);
-                        if (failed_test_num) {
-                            panic(BOLDRED "ECALL: Test %d Failed\r" RESET, failed_test_num);
+                        if (read_reg(REG_A0)) {
+                            int failed_test_num = read_reg(REG_A0) >> 1;
+                            fprintf(stderr, CYAN "  Test %d failed\n" RESET, failed_test_num);
+                            exit(-1);
                         } else {
-                            printf(GREEN "Test Passed!!" RESET);
+                            printf(GREEN "Tests Passed!" RESET);
                             exit(0);
                         }
                         
@@ -419,44 +466,36 @@ void step() {
 
             switch (func) {
                 case BEQ:
-                    printf("BEQ\n");
                     jump = read_reg(rs1) == read_reg(rs2);
                     break;
 
                 case BNE:
-                    printf("BNE\n");
                     jump = read_reg(rs1) != read_reg(rs2);
                     break;
                 
                 case BLT:
-                    printf("BLT\n");
                     jump = read_reg(rs1) < read_reg(rs2);
                     break;
                 
                 case BLTU:
-                    printf("BLTU\n");
                     jump = ((uint32_t) read_reg(rs1)) < ((uint32_t) read_reg(rs2));
                     break;
                 
                 case BGE:
-                    printf("BGE\n");
                     jump = read_reg(rs1) > read_reg(rs2);
                     break;
 
                 case BGEU:
-                    printf("BGEU\n");
                     jump = ((uint32_t) read_reg(rs1)) > ((uint32_t) read_reg(rs2));
                     break;
 
                 default:
-                    panic("unknown BRANCH func %s", as_binary_str(func, 3));
+                    panic("unknown BRANCH func3");
             }
 
             if (jump) {
-                printf("   -> Branching with offset %d\n", s_offset);
-                if (s_offset == 0) {
-                    panic("jump offset zero");
-                }
+                //printf("   -> Branching with offset %d\n", s_offset);
+                if (!s_offset) panic("jump offset zero");
                 update_pc(PC + s_offset);
                 jumped = true;
             }
@@ -473,15 +512,14 @@ void step() {
             break;
     }
 
-    // EXECUTE
-
-    if (!jumped)
+    if (!jumped) {
         update_pc(PC + 4); // 32 bits
+    }
 }
 
-int32_t main() {
-    const char* name = "riscv-tests/isa/rv32ui-p-add";
+int32_t main(int argc, char *argv[]) {
     Fhdr fhdr;
+    char* name = argv[1];
     FILE* f = fopen(name, "r");
     uint64_t size = -1;
 
