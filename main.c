@@ -21,8 +21,8 @@ void write_csr(int index, int32_t value);
 #define BASE_ADDR 0x80000000
 #define REG_A0 10 // failing test number is loaded into here
 
-#define LUI    0b0110111
-#define AUIPC  0b0010111
+#define LUI     0b0110111
+#define AUIPC   0b0010111
 #define OP_IM   0b0010011
     #define ADDI  0b000
     #define SLTI  0b010
@@ -32,15 +32,15 @@ void write_csr(int index, int32_t value);
     #define ANDI  0b111
     #define SLLI  0b001
     #define SRLI_SRAI  0b101
-#define OP     0b0110011
+#define OP       0b0110011
     #define ADD_SUB 0b000
-    #define SLL 0b001
-    #define SLT 0b010
-    #define SLTU 0b011
-    #define XOR 0b100
+    #define SLL     0b001
+    #define SLT     0b010
+    #define SLTU    0b011
+    #define XOR     0b100
     #define SRL_SRA 0b101
-    #define OR  0b110
-    #define AND 0b111
+    #define OR      0b110
+    #define AND     0b111
 #define JAL    0b1101111
 #define JALR   0b1100111
 #define LOAD   0b0000011
@@ -55,16 +55,17 @@ void write_csr(int index, int32_t value);
     #define SW  0b010
 #define STORE  0b0100011
 #define SYSTEM 0b1110011
-    #define CSRRW 0b001
-    #define CSRRS 0b010
-    #define CSRRC 0b011
+    #define CSRRW  0b001
+    #define CSRRS  0b010
+    #define CSRRC  0b011
     #define CSRRWI 0b101
-    #define ECALL_EBREAK 0b000
+    #define ECALL  0b000
+    #define EBREAK 0b000
 #define BRANCH 0b1100011
-    #define BEQ 0b000
-    #define BNE 0b001
-    #define BLT 0b100
-    #define BGE 0b101
+    #define BEQ  0b000
+    #define BNE  0b001
+    #define BLT  0b100
+    #define BGE  0b101
     #define BLTU 0b110
     #define BGEU 0b111
 #define FENCE  0b0001111
@@ -90,13 +91,10 @@ int32_t read_reg(int index) {
 }
 
 void write_reg(int index, int32_t value) {
-    if (index == 0) {
-        printf(RED "attempt to write %d to x0\n" RESET, value);
+    if (index == 0)
         return;
-    }
-    if (index > 31) {
-        panic("tried to write %d to register %d", value, index);
-    }
+    if (index > 31)
+        panic("tried to write %d to invalid register number %d", value, index);
     _reg[index] = value;
 }
 
@@ -108,38 +106,54 @@ int32_t read_csr(int index) {
     return _csr[index];
 }
 
+#define CHECK_MEM_BOUNDS(addr, type) \
+     if (addr > MEMORY_SIZE - sizeof(type) || addr < 0) \
+        panic("memory address 0x%08x out of bounds", addr);
+
 void write_csr(int index, int32_t value) {
     //if (index == 0) return;
     _csr[index] = value;
 }
 
-void write_mem(uint32_t addr, uint32_t value) {
-
+void write_mem_w(uint32_t addr, int32_t data) {
+    addr -= BASE_ADDR;
+    printf("write_mem_w addr is now %08x\n", addr);
+    CHECK_MEM_BOUNDS(addr, uint8_t);
+    *(uint32_t*)(mem + addr) = data;
 }
+
+void write_mem_h(uint32_t addr, int16_t data) {
+    addr -= BASE_ADDR;
+    printf("write_mem_h addr is now %08x\n", addr);
+    CHECK_MEM_BOUNDS(addr, uint16_t);
+    *(uint16_t*)(mem + addr) = data;
+}
+
+void write_mem_b(uint32_t addr, int8_t data) {
+    addr -= BASE_ADDR;
+    printf("write_mem_b addr is now %08x\n", addr);
+    CHECK_MEM_BOUNDS(addr, uint8_t);
+    *(uint8_t*)(mem + addr) = data;
+}
+
 
 int32_t read_mem_w(uint32_t addr) {
     addr -= BASE_ADDR;
-    if (addr > MEMORY_SIZE-sizeof(uint32_t) || addr < 0) {
-        panic("memory address 0x%08x out of bounds", addr);
-    }
+    CHECK_MEM_BOUNDS(addr, uint32_t);
     uint32_t value = *(uint32_t*)(mem + addr);
     return value;
 }
 
 int16_t read_mem_h(uint32_t addr) {
     addr -= BASE_ADDR;
-    if (addr > MEMORY_SIZE-sizeof(uint16_t) || addr < 0) {
-        panic("memory address 0x%08x out of bounds", addr);
-    }
+    CHECK_MEM_BOUNDS(addr, int16_t);
     uint16_t value = *(uint16_t*) (mem + addr);
     return value;
 }
 
 int8_t read_mem_b(uint32_t addr) {
     addr -= BASE_ADDR;
-    if (addr > MEMORY_SIZE-sizeof(uint8_t) || addr < 0) {
-        panic("memory address 0x%08x out of bounds", addr);
-    }
+    CHECK_MEM_BOUNDS(addr, int8_t);
     uint8_t value = *(uint8_t*) (mem + addr);
     return value;
 }
@@ -187,26 +201,23 @@ const char* as_binary_str(uint32_t value, int len) {
     return bits;
 }
 
-void step() {
+bool step() {
     // FETCH
     uint32_t inst = read_mem_w(PC);
     
-    dump_all();
-    printf("IFETCH: %s  0x%08x   PC: %08x\n", as_binary_str(inst, 32), inst, PC);
+    //dump_all();
+    printf("IFETCH: %s  0x%08x   " GREEN "PC: %08x\n" RESET, as_binary_str(inst, 32), inst, PC);
 
     // DECODE
     uint8_t opcode = extract(inst, 0, 6);
-    uint8_t rd   = extract(inst, 7, 11);
     uint8_t funct3 = extract(inst, 12, 14);
-    
+    uint8_t rd = extract(inst, 7, 11);
     uint8_t rs1  = extract(inst, 15, 19);
     uint8_t rs2  = extract(inst, 20, 24);
-    uint8_t shamt = rs2;
     // I-Type
     int32_t i_imm = extract(inst, 20, 31);
     int32_t i_simm = sign_extend(i_imm, 12);
     // R-Type
-    //uint8_t r_imm = extract(inst, 25, 31);
     uint8_t funct7 = extract(inst, 25, 31);
     // B-Type
     uint32_t b_imm = \
@@ -224,8 +235,13 @@ void step() {
     int32_t j_simm = sign_extend(j_imm, 21);
     // U-Type
     uint32_t u_imm = extract(inst, 12, 31);
+    // S-Type
+    uint32_t s_imm = \
+        extract(inst, 7, 11) |
+        extract(inst, 25, 31) << 5;
+    uint32_t s_simm = sign_extend(s_imm, 12);
 
-    printf("opcode: %d rd: %d rs1: %d rs2: %d funct3: %d\n", opcode, rd, rs1, rs2, funct3);
+    //printf("opcode: %d rd: %d rs1: %d rs2: %d funct3: %d\n", opcode, rd, rs1, rs2, funct3);
 
     // preload register values
     int32_t rs1_was = read_reg(rs1);
@@ -245,40 +261,41 @@ void step() {
             // I-type
             switch (funct3) {
                 case LW:
-                    printf("LW\n");
                     write_reg(rd, read_mem_w(rs1_was + i_simm));
                     break;
-                
                 case LH:
-                    printf("LH\n");
                     write_reg(rd, read_mem_h(rs1_was + i_simm)); // will sign extend
                     break;
-
                 case LB:
-                    printf("LB\n");
                     write_reg(rd, read_mem_b(rs1_was + i_simm)); // will sign extend
                     break;
-                
                 case LHU:
                     write_reg(rd, (uint16_t) read_mem_h(rs1_was + i_simm)); // zero extend
                     break;
-                
                 case LBU:
                     write_reg(rd, (uint8_t) read_mem_b(rs1_was + i_simm)); // zero extend
                     break;
-                
                 default:
                     panic("unknown LOAD funct3");
             }
             break;
         }
-        
         case STORE: {
+            printf("about to write to address 0x%08x + %d\n", rs1_was, s_imm);
             // S-type
-
+            switch (funct3) {
+                case SB:
+                    write_mem_b(rs1_was + s_simm, rs2_was);
+                    break;
+                case SH:
+                    write_mem_h(rs1_was + s_simm, rs2_was);
+                    break;
+                case SW:
+                    write_mem_w(rs1_was + s_simm, rs2_was);
+                    break;
+            }
             break;
         }
-
         case OP: {
             // R-Type operations
             write_rd = true;
@@ -290,7 +307,7 @@ void step() {
                         rd_val = rs1_was + rs2_was;
                     break;
                 case SLL:
-                    rd_val = rs1_was << (rs2_was & 0x1F);
+                    rd_val = ((uint32_t) rs1_was) << (rs2_was & 0x1F);
                     break;
                 case SLT:
                     rd_val = rs1_was < rs2_was ? 1 : 0;
@@ -302,11 +319,10 @@ void step() {
                     rd_val = rs1_was ^ rs2_was;
                     break;
                 case SRL_SRA:
-                    if (funct7 == 0b0100000) {
-                        rd_val = ((int32_t) rs1_was) >> (rs2_was & 0x1F); // arithmetic (signed) shift
-                    } else {
-                        rd_val = rs1_was >> (rs2_was & 0x1F);
-                    }
+                    if (funct7 == 0b0100000)
+                        rd_val = rs1_was >> (rs2_was & 0x1F); // arithmetic (signed) shift
+                    else
+                        rd_val = ((uint32_t) rs1_was) >> (rs2_was & 0x1F);
                     break;
                 case OR:
                     rd_val = rs1_was | rs2_was;
@@ -314,216 +330,151 @@ void step() {
                 case AND:
                     rd_val = rs1_was & rs2_was;
                     break;
-                
                 default:
                     panic("unknown OP funct3");
             }
             break;
         }
-
-        case OP_IM: {
-            // I-type
+        case OP_IM: { // I-type
             write_rd = true;
             switch (funct3) {
-                case ADDI: {
-                    // TODO/CHECK "Arithmetic overflow is ignored and the result
-                    // is simply the low XLEN bits of the result
+                case ADDI:
                     rd_val = rs1_was + i_simm;
                     break;
-                }
-                
                 case SLTI:
                     rd_val = rs1_was < i_simm ? 1 : 0;
                     break;
-                
                 case SLTIU:
-                    rd_val = ((uint32_t) rs1_was) < i_imm ? 1 : 0;
+                    rd_val = ((uint32_t) rs1_was) < i_simm ? 1 : 0;
                     break;
-                
                 case XORI:
                     rd_val = rs1_was ^ i_simm;
                     break;
-                
                 case ORI:
                     rd_val = rs1_was | i_simm;
                     break;
-
                 case ANDI:
                     rd_val = rs1_was & i_simm;
                     break;
-                
                 case SLLI:
-                    rd_val = rs1_was << shamt;
+                    rd_val = ((uint32_t) rs1_was) << rs2;
                     break;
-                
                 case SRLI_SRAI:
-                    if (i_imm & 0b010000000000)
-                        rd_val = rs1_was >> shamt; // signed
+                    if (funct7 & 0b0100000)
+                        rd_val = rs1_was >> rs2; // signed
                     else
-                        rd_val = ((uint32_t) rs1_was) >> shamt;
+                        rd_val = ((uint32_t) rs1_was) >> rs2;
                     break;
-                
                 default:
                     panic("Unknown OP_IM func");
             }
             break;
         }
-
-        case LUI:
-            // U-Type
-            printf("LUI\n");
-            write_rd = true;
-            rd_val = u_imm << 12;
-            break;
-
-        case AUIPC:
-            // U-Type
-            printf("AUIPC u_imm is\n");
-            write_rd = true;
-            rd_val = pc_was + (u_imm << 12);
-            break;
-
-        case JALR: {
-            printf("JALR\n");
-            write_rd = true;
-            // I-Type encoding
-            rd_val = new_pc;
-            new_pc = (rs1_was + i_simm) & (0xFFFFFFFF << 1);
-
-            // TODO
-            //
-            // The JAL and JALR instructions will generate an instruction-address-misaligned exception if the target address is not aligned to a four-byte boundary.
-            break;
-        }
-
-        case JAL: {
-            printf("JAL\n");
-            write_rd = true;
-            rd_val = new_pc;
-            new_pc = pc_was + j_simm;
-            break;
-        }
-
-        case SYSTEM: {
-            uint32_t imm = inst >> 20; // source/dest
-            
-            //printf("SYSTEM func %s\n", as_binary_str(func, 3));
-
-            switch (funct3) {
-                case CSRRW: {
-                    printf("CSRRW csr: %d rs1: %d rd: %d\n", imm, rs1, rd);
-                    if (rd != 0)
-                        write_reg(rd, read_csr(imm));
-                    write_csr(imm, read_reg(rs1));
-                    break;
-                }
-
-                case CSRRS: {
-                    printf("CSRRS csr: %d rs1: %d rd: %d\n", imm, rs1, rd);
-                    write_reg(rd, read_csr(imm));
-                    if (rs1 == 0) break; // avoid "side effects" of write
-                    write_csr(imm, read_csr(imm) | read_reg(rs1));
-                    break;
-                }
-
-                case CSRRC: {
-                    printf("CSRRC csr: %d rs1: %d rd: %d\n", imm, rs1, rd);
-                    if (rs1 == 0) break; // avoid "side effects" of write
-                    // clear bits set is reg(rs1)
-                    write_reg(rd, read_csr(imm) & ~read_reg(rs1));
-                }
-
-                case CSRRWI: {
-                    printf("CSRRWI csr: %d rs1: %d rd: %d\n", imm, rs1, rd);
-                    if (rd != 0)
-                        write_reg(rd, read_csr(imm));
-                    write_csr(imm, read_reg(rs1));
-                    break;
-                }
-
-                case ECALL_EBREAK: {
-                    uint32_t imm = ((int32_t) inst) >> 20;
-                    
-                    if (imm == 1) {
-                        panic("EBREAK");
-                    } else if (imm == 0) {
-                        //printf("ECALL\n");
-                        if (read_reg(REG_A0)) {
-                            int failed_test_num = read_reg(REG_A0) >> 1;
-                            dump_all();
-                            fprintf(stderr, CYAN "  Test %d failed\n" RESET, failed_test_num);
-                            exit(-1);
-                        } else {
-                            printf(GREEN "Tests Passed!\n" RESET);
-                            exit(0);
-                        }
-                        
-                    } else {
-                        printf(RED "unknown ECALL_EBREAK func: %s\n" RESET, as_binary_str(funct3, 3) );
-                    }
-                    break;
-                }
-
-                default:
-                    printf(RED "unknown SYSTEM func: %s" RESET, as_binary_str(funct3, 3) );
-            }
-
-            break;
-        }
-        
-        case BRANCH: {
-            // B-Type instruction
+        case BRANCH: { // B-Type
             bool jump = false;
-            printf("BRANCH func %s offset is %d, s_offset is %d\n", as_binary_str(funct3, 3), b_imm, b_simm);
-
             switch (funct3) {
                 case BEQ:
                     jump = rs1_was == rs2_was;
                     break;
-
                 case BNE:
                     jump = rs1_was != rs2_was;
                     break;
-                
                 case BLT:
                     jump = rs1_was < rs2_was;
                     break;
-                
                 case BLTU:
                     jump = ((uint32_t) rs1_was) < ((uint32_t) rs2_was);
                     break;
-                
                 case BGE:
-                    jump = rs1_was > rs2_was;
+                    jump = rs1_was >= rs2_was;
                     break;
-
                 case BGEU:
-                    jump = ((uint32_t) rs1_was) > ((uint32_t) rs2_was);
+                    jump = ((uint32_t) rs1_was) >= ((uint32_t) rs2_was);
                     break;
-
                 default:
-                    panic("unknown BRANCH func3");
+                    panic("unknown BRANCH funct3");
             }
-
-            if (jump) {
-                if (!b_simm) panic("jump offset zero");
+            if (jump)
                 new_pc = pc_was + b_simm;
-            }
             break;
         }
+        case LUI: // U-Type
+            write_rd = true;
+            rd_val = u_imm << 12;
+            break;
+
+        case AUIPC: // U-Type
+            write_rd = true;
+            rd_val = pc_was + (u_imm << 12);
+            break;
+
+        case JALR: // I-Type
+            write_rd = true;
+            rd_val = new_pc;
+            new_pc = (rs1_was + i_simm) & (0xFFFFFFFF << 1);
+            break;
+
+        case JAL: // J-Type
+            write_rd = true;
+            rd_val = new_pc;
+            new_pc = pc_was + j_simm;
+            break;
+
+        case SYSTEM: // I-type
+            switch (funct3) {
+                case CSRRW:
+                    if (rd != 0) {
+                        write_rd = true;
+                        rd_val = read_csr(i_imm);
+                    }
+                    write_csr(i_imm, read_reg(rs1));
+                    break;
+                case CSRRS:
+                    write_rd = true;
+                    rd_val = read_csr(i_imm);
+                    if (rs1 != 0) // avoid "side effects" of write
+                        write_csr(i_imm, read_csr(i_imm) | rs1_was);
+                    break;
+                case CSRRC:
+                    write_rd = true;
+                    if (rs1 != 0) // clear bits set is reg(rs1)
+                        rd_val = read_csr(i_imm) & ~rs1_was;
+                    break;
+                case CSRRWI:
+                    if (rd != 0) {
+                        write_rd = true;
+                        rd_val = read_csr(i_imm);
+                    }
+                    write_csr(i_imm, rs1_was);
+                    break;
+                case ECALL: // EBREAK
+                    switch (i_imm) {
+                        case 1:
+                            panic("EBREAK");
+                        case 0:
+                            return false; // signal ECALL
+                        default:
+                            fprintf(stdout, RED "unexpected ECALL/EBREAK immediate: %s\n" RESET, as_binary_str(i_imm, 12));
+                    }
+                    break;
+                default:
+                    fprintf(stdout, RED "unknown SYSTEM func: %s" RESET, as_binary_str(funct3, 3));
+            }
+            break;
 
         case FENCE:
             break;
 
         default:
             panic("expected opcode %s\n", as_binary_str(opcode, 7));
-            break;
     }
 
     // Update registers
     update_pc(new_pc);
     if (write_rd)
         write_reg(rd, rd_val);
+    
+    return true;
 }
 
 int32_t main(int argc, char *argv[]) {
@@ -534,8 +485,8 @@ int32_t main(int argc, char *argv[]) {
 
     setbuf(stdout, NULL);
     mem = malloc(MEMORY_SIZE);
-    
-    printf("Loading %s...\n", name);
+
+    printf("Loading ELF file %s...\n", name);
     readelf(f, &fhdr);
     update_pc(fhdr.entry);
     char* section_name = NULL;
@@ -543,12 +494,28 @@ int32_t main(int argc, char *argv[]) {
     // Load allocatable sections into memory
     for (int i = 0; i < fhdr.shnum; i++) {
         uint8_t* data = readelfsectioni(f, i, &section_name, &size, &fhdr);
+        //printf("section %s...\n", section_name);
         if (data == NULL) continue;
         if (fhdr.flags & 0x2) { // SHF_ALLOC
-            printf("\t%s loaded (%llu bytes)  vaddr:0x%08x\n", section_name, size, (uint32_t) fhdr.addr);
+            printf("\tSection \"%s\" loaded (%llu bytes to 0x%08x)\n", section_name, size, (uint32_t) fhdr.addr);
             memcpy(mem + fhdr.addr - 0x80000000, data, fhdr.size);
         }
     }
 
-    while(true) step();
+    printf("ELF loading finished\n\n");
+
+    while (true) {
+        if (!step()) {
+            // ECALL
+            if (read_reg(10)) {
+                int test_num = read_reg(10) >> 1;
+                dump_all();
+                fprintf(stderr, CYAN "  Test %d failed\n" RESET, test_num);
+                exit(-1);
+            } else {
+                printf(GREEN "Success!\n" RESET);
+                exit(0);
+            }
+        }
+    }
 }
