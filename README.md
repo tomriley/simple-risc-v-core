@@ -19,7 +19,7 @@ Compiling
 Running a single test
 ---------------------
 
-    $ ./core riscv-tests/isa/rv32ui-p-add
+    $ ./riscv-core riscv-tests/isa/rv32ui-p-add
 
 Example output:
 

@@ -1,18 +1,55 @@
 
-#define RESET   "\033[0m"
-#define BLACK   "\033[30m"      /* Black */
-#define RED     "\033[31m"      /* Red */
-#define GREEN   "\033[32m"      /* Green */
-#define YELLOW  "\033[33m"      /* Yellow */
-#define BLUE    "\033[34m"      /* Blue */
-#define MAGENTA "\033[35m"      /* Magenta */
-#define CYAN    "\033[36m"      /* Cyan */
-#define WHITE   "\033[37m"      /* White */
-#define BOLDBLACK   "\033[1m\033[30m"      /* Bold Black */
-#define BOLDRED     "\033[1m\033[31m"      /* Bold Red */
-#define BOLDGREEN   "\033[1m\033[32m"      /* Bold Green */
-#define BOLDYELLOW  "\033[1m\033[33m"      /* Bold Yellow */
-#define BOLDBLUE    "\033[1m\033[34m"      /* Bold Blue */
-#define BOLDMAGENTA "\033[1m\033[35m"      /* Bold Magenta */
-#define BOLDCYAN    "\033[1m\033[36m"      /* Bold Cyan */
-#define BOLDWHITE   "\033[1m\033[37m"      /* Bold White */
+#define MEMORY_SIZE 65536
+#define BASE_ADDR 0x80000000
+
+#define LUI     0b0110111
+#define AUIPC   0b0010111
+#define OP_IM   0b0010011
+    #define ADDI  0b000
+    #define SLTI  0b010
+    #define SLTIU 0b011
+    #define XORI  0b100
+    #define ORI   0b110
+    #define ANDI  0b111
+    #define SLLI  0b001
+    #define SRLI_SRAI  0b101
+#define OP       0b0110011
+    #define ADD_SUB 0b000
+    #define SLL     0b001
+    #define SLT     0b010
+    #define SLTU    0b011
+    #define XOR     0b100
+    #define SRL_SRA 0b101
+    #define OR      0b110
+    #define AND     0b111
+#define JAL    0b1101111
+#define JALR   0b1100111
+#define LOAD   0b0000011
+    #define LB  0b000
+    #define LH  0b001
+    #define LW  0b010
+    #define LBU 0b100
+    #define LHU 0b101
+#define STORE  0b0100011
+    #define SB  0b000
+    #define SH  0b001
+    #define SW  0b010
+#define STORE  0b0100011
+#define SYSTEM 0b1110011
+    #if EMULATE_CSR
+    #define CSRRW  0b001
+    #define CSRRS  0b010
+    #define CSRRC  0b011
+    #define CSRRWI 0b101
+    #endif
+    #define ECALL  0b000
+    #define EBREAK 0b000
+#define BRANCH 0b1100011
+    #define BEQ  0b000
+    #define BNE  0b001
+    #define BLT  0b100
+    #define BGE  0b101
+    #define BLTU 0b110
+    #define BGEU 0b111
+#define FENCE  0b0001111
+

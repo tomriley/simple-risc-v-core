@@ -5,89 +5,25 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include "main.h"
+#include "utils.h"
 #include "libelf/elf.h"
 
+int8_t*  mem = NULL;
+uint32_t pc = 0;
+int32_t  _regfile[32] = { 0 };
+
+void dump_regs();
 void panic(const char *fmt, ...);
-void dump_all();
 
-void update_pc(uint32_t value);
-
-int32_t read_reg(int index);
-void write_reg(int index, int32_t value);
-int32_t read_csr(int index);
-void write_csr(int index, int32_t value);
-
-#define MEMORY_SIZE 65536
-#define BASE_ADDR 0x80000000
-#define REG_A0 10 // failing test number is loaded into here
-
-#define LUI     0b0110111
-#define AUIPC   0b0010111
-#define OP_IM   0b0010011
-    #define ADDI  0b000
-    #define SLTI  0b010
-    #define SLTIU 0b011
-    #define XORI  0b100
-    #define ORI   0b110
-    #define ANDI  0b111
-    #define SLLI  0b001
-    #define SRLI_SRAI  0b101
-#define OP       0b0110011
-    #define ADD_SUB 0b000
-    #define SLL     0b001
-    #define SLT     0b010
-    #define SLTU    0b011
-    #define XOR     0b100
-    #define SRL_SRA 0b101
-    #define OR      0b110
-    #define AND     0b111
-#define JAL    0b1101111
-#define JALR   0b1100111
-#define LOAD   0b0000011
-    #define LB  0b000
-    #define LH  0b001
-    #define LW  0b010
-    #define LBU 0b100
-    #define LHU 0b101
-#define STORE  0b0100011
-    #define SB  0b000
-    #define SH  0b001
-    #define SW  0b010
-#define STORE  0b0100011
-#define SYSTEM 0b1110011
-    #define CSRRW  0b001
-    #define CSRRS  0b010
-    #define CSRRC  0b011
-    #define CSRRWI 0b101
-    #define ECALL  0b000
-    #define EBREAK 0b000
-#define BRANCH 0b1100011
-    #define BEQ  0b000
-    #define BNE  0b001
-    #define BLT  0b100
-    #define BGE  0b101
-    #define BLTU 0b110
-    #define BGEU 0b111
-#define FENCE  0b0001111
-
-#define extract(value, start, end) ((value >> start) & ((0x1 << (end - start + 1)) - 1))
-#define sign_extend(value, width) (((int32_t) value << (32 - width)) >> (32 - width))
-
-int steps = 0;
-int8_t* mem = NULL; // based at 0x80000000
-uint32_t PC = 0;
-int32_t _reg[32] = { 0 };
-int32_t _csr[4096] = { 0 };
-
-void update_pc(uint32_t value) {
+void write_pc(uint32_t value) {
     if (value & 0x3)
         panic("new PC value is unaligned address 0x%08x", value);
-    PC = value;
+    pc = value;
 }
 
 int32_t read_reg(int index) {
     if (index == 0) return 0;
-    return _reg[index];
+    return _regfile[index];
 }
 
 void write_reg(int index, int32_t value) {
@@ -95,118 +31,56 @@ void write_reg(int index, int32_t value) {
         return;
     if (index > 31)
         panic("tried to write %d to invalid register number %d", value, index);
-    _reg[index] = value;
+    _regfile[index] = value;
 }
 
+#if EMULATE_CSR
+int32_t _csr[4096] = { 0 };
+
 int32_t read_csr(int index) {
-    //if (index == 0) return 0;
-
-    //3860 is heartid?
-
     return _csr[index];
 }
 
-#define CHECK_MEM_BOUNDS(addr, type) \
-     if (addr > MEMORY_SIZE - sizeof(type) || addr < 0) \
-        panic("memory address 0x%08x out of bounds", addr);
-
 void write_csr(int index, int32_t value) {
-    //if (index == 0) return;
     _csr[index] = value;
 }
+#endif
 
-void write_mem_w(uint32_t addr, int32_t data) {
-    addr -= BASE_ADDR;
-    printf("write_mem_w addr is now %08x\n", addr);
-    CHECK_MEM_BOUNDS(addr, uint8_t);
-    *(uint32_t*)(mem + addr) = data;
-}
+#define MEM_BOUNDS_CHECK(addr, type) \
+     if (addr > MEMORY_SIZE - sizeof(type) || addr < 0) \
+        panic("memory address 0x%08x out of bounds for type " #type, addr);
 
-void write_mem_h(uint32_t addr, int16_t data) {
-    addr -= BASE_ADDR;
-    printf("write_mem_h addr is now %08x\n", addr);
-    CHECK_MEM_BOUNDS(addr, uint16_t);
-    *(uint16_t*)(mem + addr) = data;
-}
-
-void write_mem_b(uint32_t addr, int8_t data) {
-    addr -= BASE_ADDR;
-    printf("write_mem_b addr is now %08x\n", addr);
-    CHECK_MEM_BOUNDS(addr, uint8_t);
-    *(uint8_t*)(mem + addr) = data;
-}
-
-
-int32_t read_mem_w(uint32_t addr) {
-    addr -= BASE_ADDR;
-    CHECK_MEM_BOUNDS(addr, uint32_t);
-    uint32_t value = *(uint32_t*)(mem + addr);
-    return value;
-}
-
-int16_t read_mem_h(uint32_t addr) {
-    addr -= BASE_ADDR;
-    CHECK_MEM_BOUNDS(addr, int16_t);
-    uint16_t value = *(uint16_t*) (mem + addr);
-    return value;
-}
-
-int8_t read_mem_b(uint32_t addr) {
-    addr -= BASE_ADDR;
-    CHECK_MEM_BOUNDS(addr, int8_t);
-    uint8_t value = *(uint8_t*) (mem + addr);
-    return value;
-}
-
-const char* dump(uint32_t opcode) {
-    static char str[20];
-    sprintf(str, "0x%08x", opcode);
-    return str;
-}
-
-void dump_all() {
-    for (int row = 0; row < 8; row++) {
-        for (int col = 0; col < 4; col++) {
-            int i = 4*row+col;
-            printf(" x%02d:", i);
-            if (read_reg(i))
-                printf(BOLDRED " %08x " RESET, read_reg(i));
-            else
-                printf(RED " %08x " RESET, read_reg(i));
-            printf(BLUE "%-11d " RESET, read_reg(i));
-        }
-        printf("\n");
+// Define memory store methods
+#define STORE_MEM_FUNC(type) \
+    void mem_store_##type(uint32_t addr, type data) { \
+        addr -= BASE_ADDR; \
+        MEM_BOUNDS_CHECK(addr, type); \
+        *(type*)(mem + addr) = data; \
     }
-}
+STORE_MEM_FUNC(int8_t);
+STORE_MEM_FUNC(int16_t);
+STORE_MEM_FUNC(int32_t);
 
-void panic(const char *fmt, ...) {
-    char str[2048];
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(str, 2048, fmt, args);
-    va_end(args);
-    
-    fprintf(stderr, BOLDRED "panic: %s\n" RESET, str);
-    dump_all();
-    exit(-1);
-}
-
-const char* as_binary_str(uint32_t value, int len) {
-    static char bits[33];
-    bits[len] = '\0';
-    for (int i = 0; i < len; i++) {
-        bits[len - 1 - i] = (value & 0x1) ? '1' : '0';
-        value = value >> 1;
+// Define memory load methods
+#define READ_MEM_FUNC(type) \
+    type mem_load_##type(uint32_t addr) { \
+        addr -= BASE_ADDR; \
+        MEM_BOUNDS_CHECK(addr, type); \
+        return *(type*)(mem + addr); \
     }
-    return bits;
-}
+READ_MEM_FUNC(int32_t);
+READ_MEM_FUNC(int16_t);
+READ_MEM_FUNC(int8_t);
 
+//
+// RISC-V instruction pipeline
+//
 bool step() {
     // FETCH
-    uint32_t inst = read_mem_w(PC);
+    uint32_t inst = mem_load_int32_t(pc);
     
-    dump_all();
-    printf("inst: %s  0x%08x  " GREEN "PC: %08x\n" RESET, as_binary_str(inst, 32), inst, PC);
+    dump_regs();
+    printf("inst: %s  0x%08x  " GREEN "PC: %08x\n" RESET, as_binary_str(inst, 32), inst, pc);
 
     // DECODE
     uint8_t opcode = extract(inst, 0, 6);
@@ -246,10 +120,10 @@ bool step() {
     // preload register values
     int32_t rs1_was = read_reg(rs1);
     int32_t rs2_was = read_reg(rs2);
-    int32_t pc_was = PC;
+    int32_t pc_was = pc;
 
-    // new values
-    int32_t new_pc = PC + 4;
+    // values that will be written back to regs
+    int32_t new_pc = pc + 4;
     int32_t rd_val = 0xdeadbeef;
 
     // flags
@@ -259,39 +133,37 @@ bool step() {
     switch (opcode) {
         case LOAD: {
             // I-type
+            write_rd = true;
             switch (funct3) {
                 case LW:
-                    write_reg(rd, read_mem_w(rs1_was + i_simm));
+                    rd_val = mem_load_int32_t(rs1_was + i_simm);
                     break;
                 case LH:
-                    write_reg(rd, read_mem_h(rs1_was + i_simm)); // will sign extend
+                    rd_val = mem_load_int16_t(rs1_was + i_simm); // will sign extend
                     break;
                 case LB:
-                    write_reg(rd, read_mem_b(rs1_was + i_simm)); // will sign extend
+                    rd_val = mem_load_int8_t(rs1_was + i_simm); // will sign extend
                     break;
                 case LHU:
-                    write_reg(rd, (uint16_t) read_mem_h(rs1_was + i_simm)); // zero extend
+                    rd_val = (uint16_t) mem_load_int16_t(rs1_was + i_simm); // zero extend
                     break;
                 case LBU:
-                    write_reg(rd, (uint8_t) read_mem_b(rs1_was + i_simm)); // zero extend
+                    rd_val = (uint8_t) mem_load_int8_t(rs1_was + i_simm); // zero extend
                     break;
-                default:
-                    panic("unknown LOAD funct3");
             }
             break;
         }
         case STORE: {
-            printf("about to write to address 0x%08x + %d\n", rs1_was, s_imm);
             // S-type
             switch (funct3) {
                 case SB:
-                    write_mem_b(rs1_was + s_simm, rs2_was);
+                    mem_store_int8_t(rs1_was + s_simm, rs2_was);
                     break;
                 case SH:
-                    write_mem_h(rs1_was + s_simm, rs2_was);
+                    mem_store_int16_t(rs1_was + s_simm, rs2_was);
                     break;
                 case SW:
-                    write_mem_w(rs1_was + s_simm, rs2_was);
+                    mem_store_int32_t(rs1_was + s_simm, rs2_was);
                     break;
             }
             break;
@@ -423,6 +295,7 @@ bool step() {
 
         case SYSTEM: // I-type
             switch (funct3) {
+                #if EMULATE_CSR
                 case CSRRW:
                     if (rd != 0) {
                         write_rd = true;
@@ -448,6 +321,7 @@ bool step() {
                     }
                     write_csr(i_imm, rs1_was);
                     break;
+                #endif
                 case ECALL: // EBREAK
                     switch (i_imm) {
                         case 1:
@@ -471,13 +345,18 @@ bool step() {
     }
 
     // Update registers
-    update_pc(new_pc);
+    write_pc(new_pc);
     if (write_rd)
         write_reg(rd, rd_val);
     
     return true;
 }
 
+//
+// Load the ELF file specified as the sole commenad argument, set PC to entry
+// point then run our simulation pipeline until an ECALL instruction causes step()
+// to return false.
+// 
 int32_t main(int argc, char *argv[]) {
     Fhdr fhdr;
     char* name = argv[1];
@@ -489,28 +368,26 @@ int32_t main(int argc, char *argv[]) {
 
     printf("Loading ELF file %s...\n", name);
     readelf(f, &fhdr);
-    update_pc(fhdr.entry);
+    write_pc(fhdr.entry);
     char* section_name = NULL;
 
     // Load allocatable sections into memory
     for (int i = 0; i < fhdr.shnum; i++) {
         uint8_t* data = readelfsectioni(f, i, &section_name, &size, &fhdr);
-        //printf("section %s...\n", section_name);
         if (data == NULL) continue;
         if (fhdr.flags & 0x2) { // SHF_ALLOC
             printf("\tSection \"%s\" loaded (%llu bytes to 0x%08x)\n", section_name, size, (uint32_t) fhdr.addr);
             memcpy(mem + fhdr.addr - 0x80000000, data, fhdr.size);
         }
     }
-
     printf("ELF loading finished\n\n");
 
     while (true) {
         if (!step()) {
-            // ECALL
+            // ECALL signals end of test
             if (read_reg(10)) {
                 int test_num = read_reg(10) >> 1;
-                dump_all();
+                dump_regs();
                 fprintf(stderr, CYAN "  Test %d failed\n" RESET, test_num);
                 exit(-1);
             } else {
@@ -519,4 +396,33 @@ int32_t main(int argc, char *argv[]) {
             }
         }
     }
+}
+
+// Dump entire register file to stdout for debugging
+void dump_regs() {
+    for (int row = 0; row < 8; row++) {
+        for (int col = 0; col < 4; col++) {
+            int i = 4*row+col;
+            printf(" x%02d:", i);
+            if (read_reg(i))
+                printf(BOLDRED " %08x " RESET, read_reg(i));
+            else
+                printf(RED " %08x " RESET, read_reg(i));
+            printf(BLUE "%-11d " RESET, read_reg(i));
+        }
+        printf("\n");
+    }
+}
+
+// Bailing out with an error message
+void panic(const char *fmt, ...) {
+    char str[2048];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(str, 2048, fmt, args);
+    va_end(args);
+    
+    fprintf(stderr, BOLDRED "panic: %s\n" RESET, str);
+    dump_regs();
+    exit(-1);
 }
