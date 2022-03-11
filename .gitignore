@@ -4,4 +4,4 @@ libelf/
 .vscode/
 core
 *.o
-test*
+/test*
