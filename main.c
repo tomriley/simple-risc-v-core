@@ -79,6 +79,8 @@ int32_t _reg[32] = { 0 };
 int32_t _csr[4096] = { 0 };
 
 void update_pc(uint32_t value) {
+    if (value & 0x3)
+        panic("new PC value is unaligned address 0x%08x", value);
     PC = value;
 }
 
@@ -225,14 +227,14 @@ void step() {
 
     printf("opcode: %d rd: %d rs1: %d rs2: %d funct3: %d\n", opcode, rd, rs1, rs2, funct3);
 
-    // register preload
+    // preload register values
     int32_t rs1_was = read_reg(rs1);
     int32_t rs2_was = read_reg(rs2);
     int32_t pc_was = PC;
 
     // new values
     int32_t new_pc = PC + 4;
-    int32_t rd_val;
+    int32_t rd_val = 0xdeadbeef;
 
     // flags
     bool write_rd = false;
@@ -256,6 +258,17 @@ void step() {
                     printf("LB\n");
                     write_reg(rd, read_mem_b(rs1_was + i_simm)); // will sign extend
                     break;
+                
+                case LHU:
+                    write_reg(rd, (uint16_t) read_mem_h(rs1_was + i_simm)); // zero extend
+                    break;
+                
+                case LBU:
+                    write_reg(rd, (uint8_t) read_mem_b(rs1_was + i_simm)); // zero extend
+                    break;
+                
+                default:
+                    panic("unknown LOAD funct3");
             }
             break;
         }
@@ -328,15 +341,15 @@ void step() {
                     break;
                 
                 case XORI:
-                    rd_val = rs1_was ^ i_imm;
+                    rd_val = rs1_was ^ i_simm;
                     break;
                 
                 case ORI:
-                    rd_val = rs1_was | i_imm;
+                    rd_val = rs1_was | i_simm;
                     break;
 
                 case ANDI:
-                    rd_val = rs1_was & i_imm;
+                    rd_val = rs1_was & i_simm;
                     break;
                 
                 case SLLI:
@@ -374,9 +387,6 @@ void step() {
             printf("JALR\n");
             write_rd = true;
             // I-Type encoding
-            
-            // FIXME not sure if value in this rg is supposed to be updated
-            //read_reg(rs1) = target;
             rd_val = new_pc;
             new_pc = (rs1_was + i_simm) & (0xFFFFFFFF << 1);
 
@@ -389,24 +399,8 @@ void step() {
         case JAL: {
             printf("JAL\n");
             write_rd = true;
-
-            // imm[ 20 |   10:1 | 11 |  19:12 ]  [other 12 bits of instr]
-            //     1bit  10bits  1bit   8bits   = 20 bits
-            uint32_t imm = ((int32_t) inst) >> 12; // sign extended shift
-            
-            // FIXME deal with sign extending
-            int32_t offset = // cast to signed for final offset
-                (imm & 0xFFF80000) | // most significant bits unchanged
-                ((imm >> 9)  & 0x3FF) << 0  | // 10:1
-                ((imm >> 8)  & 0x001) << 10 | // 11
-                ((imm >> 0)  & 0x0FF) << 11;   // 19:12
-
-            offset = offset << 1; // see above, starts at bit 1 (multiple of 2 bytes)
-
-            printf("\timm was 0x%08x, decoded to 0x%08x\n", j_imm, j_simm);
-
             rd_val = new_pc;
-            new_pc = pc_was + offset;
+            new_pc = pc_was + j_simm;
             break;
         }
 
