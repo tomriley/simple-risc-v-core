@@ -205,8 +205,8 @@ bool step() {
     // FETCH
     uint32_t inst = read_mem_w(PC);
     
-    //dump_all();
-    printf("IFETCH: %s  0x%08x   " GREEN "PC: %08x\n" RESET, as_binary_str(inst, 32), inst, PC);
+    dump_all();
+    printf("inst: %s  0x%08x  " GREEN "PC: %08x\n" RESET, as_binary_str(inst, 32), inst, PC);
 
     // DECODE
     uint8_t opcode = extract(inst, 0, 6);
@@ -241,7 +241,7 @@ bool step() {
         extract(inst, 25, 31) << 5;
     uint32_t s_simm = sign_extend(s_imm, 12);
 
-    //printf("opcode: %d rd: %d rs1: %d rs2: %d funct3: %d\n", opcode, rd, rs1, rs2, funct3);
+    printf("opcode: %d rd: %d rs1: %d rs2: %d funct3: %d\n", opcode, rd, rs1, rs2, funct3);
 
     // preload register values
     int32_t rs1_was = read_reg(rs1);
@@ -313,7 +313,7 @@ bool step() {
                     rd_val = rs1_was < rs2_was ? 1 : 0;
                     break;
                 case SLTU:
-                    rd_val = ((int32_t) rs1_was) < ((int32_t) rs2_was) ? 1 : 0;
+                    rd_val = ((uint32_t) rs1_was) < ((uint32_t) rs2_was) ? 1 : 0;
                     break;
                 case XOR:
                     rd_val = rs1_was ^ rs2_was;
@@ -345,7 +345,8 @@ bool step() {
                     rd_val = rs1_was < i_simm ? 1 : 0;
                     break;
                 case SLTIU:
-                    rd_val = ((uint32_t) rs1_was) < i_simm ? 1 : 0;
+                    // spec says, sign extend immediate then treat as unsigned
+                    rd_val = ((uint32_t) rs1_was) < ((uint32_t) i_simm) ? 1 : 0;
                     break;
                 case XORI:
                     rd_val = rs1_was ^ i_simm;

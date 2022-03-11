@@ -21,15 +21,19 @@ Running a single test
 
     $ ./core riscv-tests/isa/rv32ui-p-add
 
-Running all tests
------------------
+Example output:
 
-    $ ./test-all.rb
+<img src="docs/run-single.png" width="600" />
+
+
+Running all rv32ui-p tests
+--------------------------
+
+    $ ./test-rv32ui-p.rb
 
 Example output:
 
-<img src="docs/test-all.jpg" width="400" />
-
+<img src="docs/test-rv32ui-p.png" width="600" />
 
 Reference
 ---------
