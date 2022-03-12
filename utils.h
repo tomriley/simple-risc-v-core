@@ -6,11 +6,8 @@
 const char* as_binary_str(uint32_t value, int len);
 
 // Decoding and sign extending macros
-#define extract(value, start, end) \
-    ((value >> start) & ((0x1 << (end - start + 1)) - 1))
-#define sign_extend(value, width) \
-    (((int32_t) value << (32 - width)) >> (32 - width))
-
+#define BITS(value, start, end) \
+    ((uint32_t) ((value >> start) & ((0x1 << (end - start + 1)) - 1)))
 
 #define RESET   "\033[0m"
 #define BLACK   "\033[30m"      /* Black */

@@ -15,6 +15,10 @@ int32_t  _regfile[32] = { 0 };
 void dump_regs();
 void panic(const char *fmt, ...);
 
+int32_t sign_extend(uint32_t value, int width) {
+    return (((int32_t) value << (32 - width)) >> (32 - width));
+}
+
 void write_pc(uint32_t value) {
     if (value & 0x3)
         panic("new PC value is unaligned address 0x%08x", value);
@@ -83,39 +87,44 @@ bool step() {
     printf("inst: %s  0x%08x  " GREEN "PC: %08x\n" RESET, as_binary_str(inst, 32), inst, pc);
 
     // DECODE
-    uint8_t opcode = extract(inst, 0, 6);
-    uint8_t funct3 = extract(inst, 12, 14);
-    uint8_t rd = extract(inst, 7, 11);
-    uint8_t rs1  = extract(inst, 15, 19);
-    uint8_t rs2  = extract(inst, 20, 24);
-    // I-Type
-    int32_t i_imm = extract(inst, 20, 31);
-    int32_t i_simm = sign_extend(i_imm, 12);
+    uint8_t opcode = BITS(inst, 0, 6);
+    uint8_t funct3 = BITS(inst, 12, 14);
+    uint8_t rd =   BITS(inst, 7, 11);
+    uint8_t rs1  = BITS(inst, 15, 19);
+    uint8_t rs2  = BITS(inst, 20, 24);
     // R-Type
-    uint8_t funct7 = extract(inst, 25, 31);
-    // B-Type
-    uint32_t b_imm = \
-        extract(inst, 8,  11) << 1 |
-        extract(inst, 25, 30) << 5 |
-        extract(inst, 7,  7)  << 11 |
-        extract(inst, 31, 31) << 12;
-    int32_t b_simm = sign_extend(b_imm, 13);
-    // J-Type
-    uint32_t j_imm = \
-        extract(inst, 21, 30) << 1 |
-        extract(inst, 20, 20) << 11 |
-        extract(inst, 12, 19) << 19 |
-        extract(inst, 31, 31) << 20;
-    int32_t j_simm = sign_extend(j_imm, 21);
-    // U-Type
-    uint32_t u_imm = extract(inst, 12, 31);
+    uint8_t funct7 = BITS(inst, 25, 31);
+    // I-Type
+    int32_t i_imm = sign_extend(BITS(inst, 20, 31), 12);
     // S-Type
-    uint32_t s_imm = \
-        extract(inst, 7, 11) |
-        extract(inst, 25, 31) << 5;
-    uint32_t s_simm = sign_extend(s_imm, 12);
+    int32_t s_imm = sign_extend(
+        BITS(inst, 7, 11) |
+        BITS(inst, 25, 31) << 5,
+        12
+    );
+    // U-Type (LUI AND AIUPC)
+    int32_t u_imm = sign_extend(BITS(inst, 12, 31), 32);
+    // B-Type
+    int32_t b_imm = sign_extend(
+        BITS(inst, 8,  11) << 1 |
+        BITS(inst, 25, 30) << 5 |
+        BITS(inst, 7,  7)  << 11 |
+        BITS(inst, 31, 31) << 12,
+        13
+    );
+    // J-Type
+    int32_t j_imm = sign_extend(
+        BITS(inst, 21, 30) << 1 |
+        BITS(inst, 20, 20) << 11 |
+        BITS(inst, 12, 19) << 19 |
+        BITS(inst, 31, 31) << 20,
+        21
+    );
 
-    printf("opcode: %d rd: %d rs1: %d rs2: %d funct3: %d\n", opcode, rd, rs1, rs2, funct3);
+    printf("opcode: %s rd: %d rs1: %d rs2: %d funct3: %d\n", as_binary_str(opcode, 7), rd, rs1, rs2, funct3);
+
+    // flags
+    bool alt = (funct7 == 0b0100000);
 
     // preload register values
     int32_t rs1_was = read_reg(rs1);
@@ -136,19 +145,19 @@ bool step() {
             write_rd = true;
             switch (funct3) {
                 case LW:
-                    rd_val = mem_load_int32_t(rs1_was + i_simm);
+                    rd_val = mem_load_int32_t(rs1_was + i_imm);
                     break;
                 case LH:
-                    rd_val = mem_load_int16_t(rs1_was + i_simm); // will sign extend
+                    rd_val = mem_load_int16_t(rs1_was + i_imm); // will sign extend
                     break;
                 case LB:
-                    rd_val = mem_load_int8_t(rs1_was + i_simm); // will sign extend
+                    rd_val = mem_load_int8_t(rs1_was + i_imm); // will sign extend
                     break;
                 case LHU:
-                    rd_val = (uint16_t) mem_load_int16_t(rs1_was + i_simm); // zero extend
+                    rd_val = (uint16_t) mem_load_int16_t(rs1_was + i_imm); // zero extend
                     break;
                 case LBU:
-                    rd_val = (uint8_t) mem_load_int8_t(rs1_was + i_simm); // zero extend
+                    rd_val = (uint8_t) mem_load_int8_t(rs1_was + i_imm); // zero extend
                     break;
             }
             break;
@@ -157,13 +166,13 @@ bool step() {
             // S-type
             switch (funct3) {
                 case SB:
-                    mem_store_int8_t(rs1_was + s_simm, rs2_was);
+                    mem_store_int8_t(rs1_was + s_imm, rs2_was);
                     break;
                 case SH:
-                    mem_store_int16_t(rs1_was + s_simm, rs2_was);
+                    mem_store_int16_t(rs1_was + s_imm, rs2_was);
                     break;
                 case SW:
-                    mem_store_int32_t(rs1_was + s_simm, rs2_was);
+                    mem_store_int32_t(rs1_was + s_imm, rs2_was);
                     break;
             }
             break;
@@ -173,7 +182,7 @@ bool step() {
             write_rd = true;
             switch (funct3) {
                 case ADD_SUB:
-                    if (funct7 == 0b0100000)
+                    if (alt)
                         rd_val = rs1_was - rs2_was;
                     else
                         rd_val = rs1_was + rs2_was;
@@ -191,7 +200,7 @@ bool step() {
                     rd_val = rs1_was ^ rs2_was;
                     break;
                 case SRL_SRA:
-                    if (funct7 == 0b0100000)
+                    if (alt)
                         rd_val = rs1_was >> (rs2_was & 0x1F); // arithmetic (signed) shift
                     else
                         rd_val = ((uint32_t) rs1_was) >> (rs2_was & 0x1F);
@@ -211,23 +220,23 @@ bool step() {
             write_rd = true;
             switch (funct3) {
                 case ADDI:
-                    rd_val = rs1_was + i_simm;
+                    rd_val = rs1_was + i_imm;
                     break;
                 case SLTI:
-                    rd_val = rs1_was < i_simm ? 1 : 0;
+                    rd_val = rs1_was < i_imm ? 1 : 0;
                     break;
                 case SLTIU:
                     // spec says, sign extend immediate then treat as unsigned
-                    rd_val = ((uint32_t) rs1_was) < ((uint32_t) i_simm) ? 1 : 0;
+                    rd_val = ((uint32_t) rs1_was) < ((uint32_t) i_imm) ? 1 : 0;
                     break;
                 case XORI:
-                    rd_val = rs1_was ^ i_simm;
+                    rd_val = rs1_was ^ i_imm;
                     break;
                 case ORI:
-                    rd_val = rs1_was | i_simm;
+                    rd_val = rs1_was | i_imm;
                     break;
                 case ANDI:
-                    rd_val = rs1_was & i_simm;
+                    rd_val = rs1_was & i_imm;
                     break;
                 case SLLI:
                     rd_val = ((uint32_t) rs1_was) << rs2;
@@ -268,7 +277,7 @@ bool step() {
                     panic("unknown BRANCH funct3");
             }
             if (jump)
-                new_pc = pc_was + b_simm;
+                new_pc = pc_was + b_imm;
             break;
         }
         case LUI: // U-Type
@@ -284,13 +293,14 @@ bool step() {
         case JALR: // I-Type
             write_rd = true;
             rd_val = new_pc;
-            new_pc = (rs1_was + i_simm) & (0xFFFFFFFF << 1);
+            new_pc = (rs1_was + i_imm) & (0xFFFFFFFF << 1);
             break;
 
         case JAL: // J-Type
             write_rd = true;
             rd_val = new_pc;
-            new_pc = pc_was + j_simm;
+            printf("j_imm is %d", j_imm);
+            new_pc = pc_was + j_imm;
             break;
 
         case SYSTEM: // I-type
