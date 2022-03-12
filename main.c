@@ -103,7 +103,7 @@ bool step() {
         12
     );
     // U-Type (LUI AND AIUPC)
-    int32_t u_imm = sign_extend(BITS(inst, 12, 31), 32);
+    int32_t u_imm = sign_extend(BITS(inst, 12, 31) << 12, 32);
     // B-Type
     int32_t b_imm = sign_extend(
         BITS(inst, 8,  11) << 1 |
@@ -282,12 +282,12 @@ bool step() {
         }
         case LUI: // U-Type
             write_rd = true;
-            rd_val = u_imm << 12;
+            rd_val = u_imm;
             break;
 
         case AUIPC: // U-Type
             write_rd = true;
-            rd_val = pc_was + (u_imm << 12);
+            rd_val = pc_was + u_imm;
             break;
 
         case JALR: // I-Type
