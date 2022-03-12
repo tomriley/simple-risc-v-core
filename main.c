@@ -15,8 +15,12 @@ int32_t  _regfile[32] = { 0 };
 void dump_regs();
 void panic(const char *fmt, ...);
 
-int32_t sign_extend(uint32_t value, int width) {
-    return (((int32_t) value << (32 - width)) >> (32 - width));
+int32_t sign_extend(uint32_t value, const int width) {
+    if (value & (0x1 << (width - 1))) {
+        return value | (INT32_MIN >> (32 - width));
+    } else {
+        return value;
+    }
 }
 
 void write_pc(uint32_t value) {
@@ -89,9 +93,9 @@ bool step() {
     // DECODE
     uint8_t opcode = BITS(inst, 0, 6);
     uint8_t funct3 = BITS(inst, 12, 14);
-    uint8_t rd =   BITS(inst, 7, 11);
-    uint8_t rs1  = BITS(inst, 15, 19);
-    uint8_t rs2  = BITS(inst, 20, 24);
+    uint8_t rd = BITS(inst, 7, 11);
+    uint8_t rs1 = BITS(inst, 15, 19);
+    uint8_t rs2 = BITS(inst, 20, 24);
     // R-Type
     uint8_t funct7 = BITS(inst, 25, 31);
     // I-Type
@@ -112,6 +116,7 @@ bool step() {
         BITS(inst, 31, 31) << 12,
         13
     );
+
     // J-Type
     int32_t j_imm = sign_extend(
         BITS(inst, 21, 30) << 1 |
@@ -120,9 +125,9 @@ bool step() {
         BITS(inst, 31, 31) << 20,
         21
     );
-
+    
     printf("opcode: %s rd: %d rs1: %d rs2: %d funct3: %d\n", as_binary_str(opcode, 7), rd, rs1, rs2, funct3);
-
+    
     // flags
     bool alt = (funct7 == 0b0100000);
 
@@ -136,13 +141,19 @@ bool step() {
     int32_t rd_val = 0xdeadbeef;
 
     // flags
-    bool write_rd = false;
+    bool write_rd =
+        opcode == JAL ||
+        opcode == JALR ||
+        opcode == LOAD ||
+        opcode == OP ||
+        opcode == OP_IM ||
+        opcode == LUI ||
+        opcode == AUIPC;
 
     // EXECUTE
     switch (opcode) {
         case LOAD: {
             // I-type
-            write_rd = true;
             switch (funct3) {
                 case LW:
                     rd_val = mem_load_int32_t(rs1_was + i_imm);
@@ -179,7 +190,6 @@ bool step() {
         }
         case OP: {
             // R-Type operations
-            write_rd = true;
             switch (funct3) {
                 case ADD_SUB:
                     if (alt)
@@ -217,7 +227,6 @@ bool step() {
             break;
         }
         case OP_IM: { // I-type
-            write_rd = true;
             switch (funct3) {
                 case ADDI:
                     rd_val = rs1_was + i_imm;
@@ -242,7 +251,7 @@ bool step() {
                     rd_val = ((uint32_t) rs1_was) << rs2;
                     break;
                 case SRLI_SRAI:
-                    if (funct7 & 0b0100000)
+                    if (alt)
                         rd_val = rs1_was >> rs2; // signed
                     else
                         rd_val = ((uint32_t) rs1_was) >> rs2;
@@ -281,25 +290,20 @@ bool step() {
             break;
         }
         case LUI: // U-Type
-            write_rd = true;
             rd_val = u_imm;
             break;
 
         case AUIPC: // U-Type
-            write_rd = true;
             rd_val = pc_was + u_imm;
             break;
 
         case JALR: // I-Type
-            write_rd = true;
             rd_val = new_pc;
             new_pc = (rs1_was + i_imm) & (0xFFFFFFFF << 1);
             break;
 
         case JAL: // J-Type
-            write_rd = true;
             rd_val = new_pc;
-            printf("j_imm is %d", j_imm);
             new_pc = pc_was + j_imm;
             break;
 
