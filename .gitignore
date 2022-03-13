@@ -5,3 +5,4 @@
 /riscv-core
 *.o
 /test*
+*.mem

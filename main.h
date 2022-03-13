@@ -12,14 +12,17 @@
     #define ORI   0b110
     #define ANDI  0b111
     #define SLLI  0b001
-    #define SRLI_SRAI  0b101
+    #define SRLI  0b101
+    #define SRAI  0b101 // with alt flag
 #define OP       0b0110011
-    #define ADD_SUB 0b000
+    #define ADD   0b000
+    #define SUB   0b000 // with alt flag
     #define SLL     0b001
     #define SLT     0b010
     #define SLTU    0b011
     #define XOR     0b100
-    #define SRL_SRA 0b101
+    #define SRL     0b101
+    #define SRA     0b101 // with alt flag
     #define OR      0b110
     #define AND     0b111
 #define JAL    0b1101111
@@ -52,4 +55,5 @@
     #define BLTU 0b110
     #define BGEU 0b111
 #define FENCE  0b0001111
+
 

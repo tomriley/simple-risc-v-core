@@ -1,5 +1,5 @@
-#include <stdint.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <string.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -80,6 +80,20 @@ READ_MEM_FUNC(int32_t);
 READ_MEM_FUNC(int16_t);
 READ_MEM_FUNC(int8_t);
 
+int32_t alu(int32_t x, int32_t y, uint32_t operator, bool alt) {
+    switch (operator) {
+        case ADD: return alt ? x - y : x + y;
+        case SLL: return ((uint32_t) x) << (y & 0x1F);
+        case SLT: return x < y ? 1 : 0;
+        case SLTU: return ((uint32_t) x) < ((uint32_t) y) ? 1 : 0;
+        case XOR: return x ^ y;
+        case SRL: return alt ? x >> (y & 0x1F) : ((uint32_t) x) >> (y & 0x1F);
+        case OR: return x | y;
+        case AND: return x & y;
+        default: panic("unknown arith operator %d", operator); return 0;
+    }
+}
+
 //
 // RISC-V instruction pipeline
 //
@@ -129,7 +143,11 @@ bool step() {
     printf("opcode: %s rd: %d rs1: %d rs2: %d funct3: %d\n", as_binary_str(opcode, 7), rd, rs1, rs2, funct3);
     
     // flags
-    bool alt = (funct7 == 0b0100000);
+    bool alt = funct7 == 0b0100000 && (
+        opcode == OP && funct3 == SUB ||
+        opcode == OP && funct3 == SRA ||
+        opcode == OP_IM && funct3 == SRAI
+    );
 
     // preload register values
     int32_t rs1_was = read_reg(rs1);
@@ -189,76 +207,17 @@ bool step() {
             break;
         }
         case OP: {
-            // R-Type operations
-            switch (funct3) {
-                case ADD_SUB:
-                    if (alt)
-                        rd_val = rs1_was - rs2_was;
-                    else
-                        rd_val = rs1_was + rs2_was;
-                    break;
-                case SLL:
-                    rd_val = ((uint32_t) rs1_was) << (rs2_was & 0x1F);
-                    break;
-                case SLT:
-                    rd_val = rs1_was < rs2_was ? 1 : 0;
-                    break;
-                case SLTU:
-                    rd_val = ((uint32_t) rs1_was) < ((uint32_t) rs2_was) ? 1 : 0;
-                    break;
-                case XOR:
-                    rd_val = rs1_was ^ rs2_was;
-                    break;
-                case SRL_SRA:
-                    if (alt)
-                        rd_val = rs1_was >> (rs2_was & 0x1F); // arithmetic (signed) shift
-                    else
-                        rd_val = ((uint32_t) rs1_was) >> (rs2_was & 0x1F);
-                    break;
-                case OR:
-                    rd_val = rs1_was | rs2_was;
-                    break;
-                case AND:
-                    rd_val = rs1_was & rs2_was;
-                    break;
-                default:
-                    panic("unknown OP funct3");
-            }
+            rd_val = alu(rs1_was, rs2_was, funct3, alt);
+            // lhs = rs1_was;
+            // rhs = rs2_was;
+            // operator = funct3;
             break;
         }
-        case OP_IM: { // I-type
-            switch (funct3) {
-                case ADDI:
-                    rd_val = rs1_was + i_imm;
-                    break;
-                case SLTI:
-                    rd_val = rs1_was < i_imm ? 1 : 0;
-                    break;
-                case SLTIU:
-                    // spec says, sign extend immediate then treat as unsigned
-                    rd_val = ((uint32_t) rs1_was) < ((uint32_t) i_imm) ? 1 : 0;
-                    break;
-                case XORI:
-                    rd_val = rs1_was ^ i_imm;
-                    break;
-                case ORI:
-                    rd_val = rs1_was | i_imm;
-                    break;
-                case ANDI:
-                    rd_val = rs1_was & i_imm;
-                    break;
-                case SLLI:
-                    rd_val = ((uint32_t) rs1_was) << rs2;
-                    break;
-                case SRLI_SRAI:
-                    if (alt)
-                        rd_val = rs1_was >> rs2; // signed
-                    else
-                        rd_val = ((uint32_t) rs1_was) >> rs2;
-                    break;
-                default:
-                    panic("Unknown OP_IM func");
-            }
+        case OP_IM: {
+            rd_val = alu(rs1_was, i_imm, funct3, alt);
+            // lhs = rs1_was;
+            // rhs = i_imm;
+            // operator = funct3;
             break;
         }
         case BRANCH: { // B-Type

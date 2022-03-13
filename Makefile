@@ -1,7 +1,7 @@
 riscv-core: deps main.o utils.o
 	cc -g -o riscv-core main.o utils.o libelf/libelf.a libelf/libbele/libbele.a
 
-main.o: main.c utils.h
+main.o: main.c main.h utils.h
 	cc -g -c main.c
 
 utils.o: utils.c utils.h
