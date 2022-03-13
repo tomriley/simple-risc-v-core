@@ -15,21 +15,23 @@ module core(
   reg[31:0] idata;
   reg[7:0] mem[65536];
 
-  // 
-  //reg[31:0] pc_was;
-  reg[31:0] rs1_was;
-  reg[31:0] rs2_was;
+  reg[31:0] rs1v;
+  reg[31:0] rs2v;
 
   // intermediate state
-  reg write_rd;
-  reg jump_to_result; // jump to ALU result
-  reg[31:0] rd_val;
+  // flags
+  reg write_pending;
+  reg write_alu_result;
+  reg alu_result_is_new_pc;
+  // data
+  reg[31:0] pending;
+  reg[31:0] pc_was;
   reg[31:0] pending_pc;
   
   // alu inputs
   reg[31:0] lhs;
   reg[31:0] rhs;
-  reg[2:0] func;
+  reg[2:0] oper;
   reg alt;
   
   // decode results
@@ -38,7 +40,9 @@ module core(
   wire[2:0] funct3;
   wire[6:0] funct7;
   wire[4:0] rd;
-  wire[31:0] result;
+  
+  // alu output
+  wire[31:0] alu_result;
 
   // pipeline stage
   reg[4:0] pstage;
@@ -57,9 +61,9 @@ module core(
     .clk(clk),
     .lhs(lhs),
     .rhs(rhs),
-    .func(func),
+    .func(oper),
     .alt(alt),
-    .result(result)
+    .result(alu_result)
   );
 
   initial begin
@@ -80,78 +84,77 @@ module core(
     end
     
     idata <= {mem[pc+3], mem[pc+2], mem[pc+1], mem[pc]};
-    pending_pc <= pc + 4;
     
-    alt <= 0; // alt arith flag  TODO
-      
-    rs1_was <= regs[decoder.rs1];
-    rs2_was <= regs[decoder.rs2];
+    alt <= funct7 == 7'b0100000 && (
+        opcode == `OP && funct3 == `SUB ||
+        opcode == `OP && funct3 == `SRA ||
+        opcode == `OP_IM && funct3 == `SRAI
+    );
+    
+    rs1v <= regs[decoder.rs1];
+    rs2v <= regs[decoder.rs2];
 
-    write_rd <=
-      opcode == `JAL ||
-      opcode == `JALR ||
-      opcode == `LOAD ||
-      opcode == `OP ||
-      opcode == `OP_IM ||
-      opcode == `LUI ||
-      opcode == `AUIPC;
+    // values that will be written back to regs
+    pending_pc <= pc + 4;
+    pending <= 32'hdeadbeef;
+    pc_was <= pc;
+    
+    // flags
+    write_pending <= // pending should be written back to rd
+        opcode == `JAL ||
+        opcode == `JALR;
+    write_alu_result <= // result of apu should be written back to rd
+        opcode == `LOAD ||
+        opcode == `OP ||
+        opcode == `OP_IM ||
+        opcode == `LUI ||
+        opcode == `AUIPC; 
+    alu_result_is_new_pc <=
+        opcode == `JAL ||
+        opcode == `JALR;
 
-    case (opcode)
-      `LUI: begin
-        rd_val <= imm;
-      end
-      `AUIPC: begin
-        lhs <= pc;
+    lhs <= rs1v;
+    rhs <= opcode == `OP ? rs2v : imm;
+    oper <= funct3;
+
+
+    // for the following 3:
+    //      rhs is always imm
+    //      oper always ADD
+    if (opcode == `AUIPC) begin
+        lhs <= pc_was;
         rhs <= imm;
-        func <= `ADD;
-        rd_val <= result;
-      end
-      `JAL: begin
-        rd_val <= pending_pc;
-        lhs <= pc;
+        oper <= `ADD;
+    end
+
+    if (opcode == `JALR) begin
+        pending <= pending_pc; // old target pc
+        lhs <= rs1v;
         rhs <= imm;
-        func <= `ADD;
-        jump_to_result <= 1;
-      end
-      `JALR: begin
-        rd_val <= pending_pc;
-        lhs <= rs1_was;
+        oper <= `ADD;
+    end
+
+    if (opcode == `JAL) begin
+        pending <= pending_pc; // old target pc
+        lhs <=  pc_was;
         rhs <= imm;
-        func <= `ADD;
-        rd_val <= result;
-      end
-      `OP: begin
-        lhs <= rs1_was;
-        rhs <= rs2_was;
-        func <= decoder.funct3;
-        rd_val <= result;
-      end
-      `OP_IM: begin
-        lhs <= rs1_was;
-        rhs <= imm;
-        rd_val <= result;
-      end
-    endcase
+        oper <= `ADD;
+    end
+
+    // memory access stage TODO
+
+    // SYSTEM opcodes TODO
     
     if (pstage == 5'b10000) begin
-      $display("WRITEBACK STAGE");
-
-      $display("AUT result=%d", result);
-
-      // update target reg
-      if (write_rd && rd != 0) begin
-        $display("writing %h into register %rd", rd_val, rd);
-        regs[rd] <= rd_val;
-      end
+      // Update PC
+      if (alu_result_is_new_pc)
+          pc <= alu_result;
+      else
+          pc <= pending_pc;
       
-      // update PC
-      if (jump_to_result) begin
-        $display("writing result %h to PC", result);
-        pc <= result;
-      end else begin
-        $display("writing pending_pc %h to PC", pending_pc);
-        pc <= pending_pc;
-      end
+      // Update target register
+      if (write_pending && rd != 0)
+          regs[rd] = pending;
       
       pstage <= 5'b00001;
     end

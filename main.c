@@ -111,44 +111,44 @@ int32_t alu(int32_t x, int32_t y, uint32_t operator, bool alt) {
 //
 bool step() {
     // FETCH
-    uint32_t inst = mem_load_int32_t(pc);
+    uint32_t idata = mem_load_int32_t(pc);
     
     dump_regs();
-    printf("inst: %s  0x%08x  " GREEN "PC: %08x\n" RESET, as_binary_str(inst, 32), inst, pc);
+    printf("idata: %s  0x%08x  " GREEN "PC: %08x\n" RESET, as_binary_str(idata, 32), idata, pc);
 
     // DECODE
-    uint8_t opcode = BITS(inst, 0, 6);
-    uint8_t funct3 = BITS(inst, 12, 14);
-    uint8_t rd = BITS(inst, 7, 11);
-    uint8_t rs1 = BITS(inst, 15, 19);
-    uint8_t rs2 = BITS(inst, 20, 24);
+    uint8_t opcode = BITS(idata, 0, 6);
+    uint8_t funct3 = BITS(idata, 12, 14);
+    uint8_t rd = BITS(idata, 7, 11);
+    uint8_t rs1 = BITS(idata, 15, 19);
+    uint8_t rs2 = BITS(idata, 20, 24);
     // R-Type
-    uint8_t funct7 = BITS(inst, 25, 31);
+    uint8_t funct7 = BITS(idata, 25, 31);
     // I-Type
-    int32_t i_imm = sign_extend(BITS(inst, 20, 31), 12);
+    int32_t i_imm = sign_extend(BITS(idata, 20, 31), 12);
     // S-Type
     int32_t s_imm = sign_extend(
-        BITS(inst, 7, 11) |
-        BITS(inst, 25, 31) << 5,
+        BITS(idata, 7, 11) |
+        BITS(idata, 25, 31) << 5,
         12
     );
     // U-Type (LUI AND AIUPC)
-    int32_t u_imm = sign_extend(BITS(inst, 12, 31) << 12, 32);
+    int32_t u_imm = sign_extend(BITS(idata, 12, 31) << 12, 32);
     // B-Type
     int32_t b_imm = sign_extend(
-        BITS(inst, 8,  11) << 1 |
-        BITS(inst, 25, 30) << 5 |
-        BITS(inst, 7,  7)  << 11 |
-        BITS(inst, 31, 31) << 12,
+        BITS(idata, 8,  11) << 1 |
+        BITS(idata, 25, 30) << 5 |
+        BITS(idata, 7,  7)  << 11 |
+        BITS(idata, 31, 31) << 12,
         13
     );
 
     // J-Type
     int32_t j_imm = sign_extend(
-        BITS(inst, 21, 30) << 1 |
-        BITS(inst, 20, 20) << 11 |
-        BITS(inst, 12, 19) << 19 |
-        BITS(inst, 31, 31) << 20,
+        BITS(idata, 21, 30) << 1 |
+        BITS(idata, 20, 20) << 11 |
+        BITS(idata, 12, 19) << 19 |
+        BITS(idata, 31, 31) << 20,
         21
     );
     
@@ -321,7 +321,7 @@ bool step() {
         write_pc(pending_pc);
     
     // Update target register
-    if (write_pending)
+    if (write_pending && rd != 0)
         write_reg(rd, pending);
     
     return true;

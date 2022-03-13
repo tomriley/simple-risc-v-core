@@ -18,7 +18,8 @@ module riscv_tb;
   end
 
   always @ (posedge clk) begin
-    $display("%b %h  PC: %h  pstage: %b", core.idata, core.idata, core.pc, core.pstage);
+    if (core.pstage == 2'b10) // after decode
+      $display("%b %h  PC: %h  pstage: %b", core.idata, core.idata, core.pc, core.pstage);
     //for (integer row = 0; row < 8; row++) begin
     //  $display("x%d: %h x%d: %h x%d: %h x%d: %h", row*4, core.regs[row*4], row*4+1, core.regs[row*4+1], row*4+2, core.regs[row*4+2], row*4+3, core.regs[row*4+3]);  
     //end
