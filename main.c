@@ -80,6 +80,18 @@ READ_MEM_FUNC(int32_t);
 READ_MEM_FUNC(int16_t);
 READ_MEM_FUNC(int8_t);
 
+bool branch(int32_t x, int32_t y, int32_t operator) {
+    switch (operator) {
+        case BEQ: return x == y;
+        case BNE: return x != y;
+        case BLT: return x < y;
+        case BLTU: return ((uint32_t) x) < ((uint32_t) y);
+        case BGE: return x >= y;
+        case BGEU: return ((uint32_t) x) >= ((uint32_t) y);
+        default: return false;
+    }
+}
+
 int32_t alu(int32_t x, int32_t y, uint32_t operator, bool alt) {
     switch (operator) {
         case ADD: return alt ? x - y : x + y;
@@ -140,8 +152,6 @@ bool step() {
         21
     );
     
-    printf("opcode: %s rd: %d rs1: %d rs2: %d funct3: %d\n", as_binary_str(opcode, 7), rd, rs1, rs2, funct3);
-    
     // flags
     bool alt = funct7 == 0b0100000 && (
         opcode == OP && funct3 == SUB ||
@@ -150,43 +160,83 @@ bool step() {
     );
 
     // preload register values
-    int32_t rs1_was = read_reg(rs1);
-    int32_t rs2_was = read_reg(rs2);
+    int32_t rs1v = read_reg(rs1);
+    int32_t rs2v = read_reg(rs2);
     int32_t pc_was = pc;
 
+    printf("opcode: %s rd: %d rs1: %d (v %d) rs2: %d (v %d) funct3: %d  i_imm: 0x%08x\n", as_binary_str(opcode, 7), rd, rs1, rs1v, rs2, rs2v, funct3, i_imm);
+
     // values that will be written back to regs
-    int32_t new_pc = pc + 4;
-    int32_t rd_val = 0xdeadbeef;
+    int32_t pending_pc = pc + 4;
+    int32_t pending = 0xdeadbeef; // pending rd value
 
     // flags
-    bool write_rd =
+    bool write_pending = // pending should be written back to rd
         opcode == JAL ||
-        opcode == JALR ||
+        opcode == JALR;
+    bool write_alu_result = // result of apu should be written back to rd
         opcode == LOAD ||
         opcode == OP ||
         opcode == OP_IM ||
         opcode == LUI ||
-        opcode == AUIPC;
+        opcode == AUIPC; 
+    bool alu_result_is_new_pc =
+        opcode == JAL ||
+        opcode == JALR;
+    
+    int32_t lhs = rs1v;
+    int32_t rhs = opcode == OP ? rs2v : i_imm;
+    int32_t oper = funct3;
 
-    // EXECUTE
+    if (opcode == LUI) {
+        pending = u_imm;
+    }
+
+    // for the following 3:
+    //      rhs is always imm
+    //      oper always ADD
+    if (opcode == AUIPC) {
+        lhs = pc_was;
+        rhs = u_imm;
+        oper = ADD;
+    }
+
+    if (opcode == JALR) {
+        pending = pending_pc; // old target pc
+        lhs = rs1v;
+        rhs = i_imm;
+        oper = ADD;
+    }
+
+    if (opcode == JAL) { // J-Type
+        pending = pending_pc; // old target pc
+        lhs =  pc_was;
+        rhs = j_imm;
+        oper = ADD;
+    }
+
+    bool branch_result = branch(rs1v, rs2v, funct3);
+    int32_t alu_result = alu(lhs, rhs, oper, alt);
+    
+    // Memory load/store
     switch (opcode) {
         case LOAD: {
             // I-type
             switch (funct3) {
                 case LW:
-                    rd_val = mem_load_int32_t(rs1_was + i_imm);
+                    pending = mem_load_int32_t(rs1v + i_imm);
                     break;
                 case LH:
-                    rd_val = mem_load_int16_t(rs1_was + i_imm); // will sign extend
+                    pending = mem_load_int16_t(rs1v + i_imm); // will sign extend
                     break;
                 case LB:
-                    rd_val = mem_load_int8_t(rs1_was + i_imm); // will sign extend
+                    pending = mem_load_int8_t(rs1v + i_imm); // will sign extend
                     break;
                 case LHU:
-                    rd_val = (uint16_t) mem_load_int16_t(rs1_was + i_imm); // zero extend
+                    pending = (uint16_t) mem_load_int16_t(rs1v + i_imm); // zero extend
                     break;
                 case LBU:
-                    rd_val = (uint8_t) mem_load_int8_t(rs1_was + i_imm); // zero extend
+                    pending = (uint8_t) mem_load_int8_t(rs1v + i_imm); // zero extend
                     break;
             }
             break;
@@ -195,104 +245,47 @@ bool step() {
             // S-type
             switch (funct3) {
                 case SB:
-                    mem_store_int8_t(rs1_was + s_imm, rs2_was);
+                    mem_store_int8_t(rs1v + s_imm, rs2v);
                     break;
                 case SH:
-                    mem_store_int16_t(rs1_was + s_imm, rs2_was);
+                    mem_store_int16_t(rs1v + s_imm, rs2v);
                     break;
                 case SW:
-                    mem_store_int32_t(rs1_was + s_imm, rs2_was);
+                    mem_store_int32_t(rs1v + s_imm, rs2v);
                     break;
             }
             break;
         }
-        case OP: {
-            rd_val = alu(rs1_was, rs2_was, funct3, alt);
-            // lhs = rs1_was;
-            // rhs = rs2_was;
-            // operator = funct3;
-            break;
-        }
-        case OP_IM: {
-            rd_val = alu(rs1_was, i_imm, funct3, alt);
-            // lhs = rs1_was;
-            // rhs = i_imm;
-            // operator = funct3;
-            break;
-        }
-        case BRANCH: { // B-Type
-            bool jump = false;
-            switch (funct3) {
-                case BEQ:
-                    jump = rs1_was == rs2_was;
-                    break;
-                case BNE:
-                    jump = rs1_was != rs2_was;
-                    break;
-                case BLT:
-                    jump = rs1_was < rs2_was;
-                    break;
-                case BLTU:
-                    jump = ((uint32_t) rs1_was) < ((uint32_t) rs2_was);
-                    break;
-                case BGE:
-                    jump = rs1_was >= rs2_was;
-                    break;
-                case BGEU:
-                    jump = ((uint32_t) rs1_was) >= ((uint32_t) rs2_was);
-                    break;
-                default:
-                    panic("unknown BRANCH funct3");
-            }
-            if (jump)
-                new_pc = pc_was + b_imm;
-            break;
-        }
-        case LUI: // U-Type
-            rd_val = u_imm;
-            break;
+    }
 
-        case AUIPC: // U-Type
-            rd_val = pc_was + u_imm;
-            break;
-
-        case JALR: // I-Type
-            rd_val = new_pc;
-            new_pc = (rs1_was + i_imm) & (0xFFFFFFFF << 1);
-            break;
-
-        case JAL: // J-Type
-            rd_val = new_pc;
-            new_pc = pc_was + j_imm;
-            break;
-
+    switch (opcode) {
         case SYSTEM: // I-type
             switch (funct3) {
                 #if EMULATE_CSR
                 case CSRRW:
                     if (rd != 0) {
-                        write_rd = true;
-                        rd_val = read_csr(i_imm);
+                        write_pending = true;
+                        pending = read_csr(i_imm);
                     }
                     write_csr(i_imm, read_reg(rs1));
                     break;
                 case CSRRS:
-                    write_rd = true;
-                    rd_val = read_csr(i_imm);
+                    write_pending = true;
+                    pending = read_csr(i_imm);
                     if (rs1 != 0) // avoid "side effects" of write
-                        write_csr(i_imm, read_csr(i_imm) | rs1_was);
+                        write_csr(i_imm, read_csr(i_imm) | rs1v);
                     break;
                 case CSRRC:
-                    write_rd = true;
+                    write_pending = true;
                     if (rs1 != 0) // clear bits set is reg(rs1)
-                        rd_val = read_csr(i_imm) & ~rs1_was;
+                        pending = read_csr(i_imm) & ~rs1v;
                     break;
                 case CSRRWI:
                     if (rd != 0) {
-                        write_rd = true;
-                        rd_val = read_csr(i_imm);
+                        write_pending = true;
+                        pending = read_csr(i_imm);
                     }
-                    write_csr(i_imm, rs1_was);
+                    write_csr(i_imm, rs1v);
                     break;
                 #endif
                 case ECALL: // EBREAK
@@ -313,14 +306,23 @@ bool step() {
         case FENCE:
             break;
 
-        default:
-            panic("expected opcode %s\n", as_binary_str(opcode, 7));
+        case BRANCH:
+            if (branch_result) {
+                // assume branching has it's own adder unit
+                pending_pc = pc_was + b_imm;
+            }
+            break;
     }
 
-    // Update registers
-    write_pc(new_pc);
-    if (write_rd)
-        write_reg(rd, rd_val);
+    // Update PC
+    if (alu_result_is_new_pc)
+        write_pc(alu_result);
+    else
+        write_pc(pending_pc);
+    
+    // Update target register
+    if (write_pending)
+        write_reg(rd, pending);
     
     return true;
 }
@@ -337,6 +339,7 @@ int32_t main(int argc, char *argv[]) {
     uint64_t size = -1;
 
     setbuf(stdout, NULL);
+    setbuf(stderr, NULL);
     mem = malloc(MEMORY_SIZE);
 
     printf("Loading ELF file %s...\n", name);
@@ -355,12 +358,13 @@ int32_t main(int argc, char *argv[]) {
     }
     printf("ELF loading finished\n\n");
 
-    printf("Dumping memory...");
+    printf("Dumping memory...\n");
     FILE* rom_file = fopen("rom_image.mem", "w");
     for (int i=0; i<MEMORY_SIZE; i++) {
         fprintf(rom_file, "%02x\n", (uint8_t) mem[i]);
     }
     fclose(rom_file);
+    printf("Done\n");
 
     while (true) {
         if (!step()) {

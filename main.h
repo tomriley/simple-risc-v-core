@@ -4,6 +4,13 @@
 
 #define LUI     0b0110111
 #define AUIPC   0b0010111
+#define BRANCH 0b1100011
+    #define BEQ  0b000
+    #define BNE  0b001
+    #define BLT  0b100
+    #define BGE  0b101
+    #define BLTU 0b110
+    #define BGEU 0b111
 #define OP_IM   0b0010011
     #define ADDI  0b000
     #define SLTI  0b010
@@ -47,13 +54,7 @@
     #endif
     #define ECALL  0b000
     #define EBREAK 0b000
-#define BRANCH 0b1100011
-    #define BEQ  0b000
-    #define BNE  0b001
-    #define BLT  0b100
-    #define BGE  0b101
-    #define BLTU 0b110
-    #define BGEU 0b111
+
 #define FENCE  0b0001111
 
 
