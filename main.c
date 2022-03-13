@@ -133,7 +133,7 @@ bool step() {
         12
     );
     // U-Type (LUI AND AIUPC)
-    int32_t u_imm = sign_extend(BITS(idata, 12, 31) << 12, 32);
+    int32_t u_imm = BITS(idata, 12, 31) << 12;
     // B-Type
     int32_t b_imm = sign_extend(
         BITS(idata, 8,  11) << 1 |
@@ -164,17 +164,17 @@ bool step() {
     int32_t rs2v = read_reg(rs2);
     int32_t pc_was = pc;
 
-    printf("opcode: %s rd: %d rs1: %d (v %d) rs2: %d (v %d) funct3: %d  i_imm: 0x%08x\n", as_binary_str(opcode, 7), rd, rs1, rs1v, rs2, rs2v, funct3, i_imm);
+    printf("opcode: %s rd: %d rs1: %d (v %d) rs2: %d (v %d) funct3: %d  u_imm: 0x%08x\n", as_binary_str(opcode, 7), rd, rs1, rs1v, rs2, rs2v, funct3, u_imm);
 
     // values that will be written back to regs
     int32_t pending_pc = pc + 4;
     int32_t pending = 0xdeadbeef; // pending rd value
 
     // flags
-    bool write_pending = // pending should be written back to rd
+    bool write_back = // write back pending to rd
         opcode == JAL ||
         opcode == JALR;
-    bool write_alu_result = // result of apu should be written back to rd
+    bool write_alu_result = // write the API result back to rd
         opcode == LOAD ||
         opcode == OP ||
         opcode == OP_IM ||
@@ -188,13 +188,16 @@ bool step() {
     int32_t rhs = opcode == OP ? rs2v : i_imm;
     int32_t oper = funct3;
 
-    if (opcode == LUI) {
-        pending = u_imm;
-    }
-
     // for the following 3:
     //      rhs is always imm
     //      oper always ADD
+    
+    if (opcode == LUI) {
+        rhs = u_imm;
+        lhs = 0;
+        oper = ADD;
+    }
+
     if (opcode == AUIPC) {
         lhs = pc_was;
         rhs = u_imm;
@@ -299,7 +302,7 @@ bool step() {
                     }
                     break;
                 default:
-                    fprintf(stdout, RED "unknown SYSTEM func: %s" RESET, as_binary_str(funct3, 3));
+                    fprintf(stdout, RED "unknown SYSTEM func: %s\n" RESET, as_binary_str(funct3, 3));
             }
             break;
 
@@ -321,8 +324,14 @@ bool step() {
         write_pc(pending_pc);
     
     // Update target register
-    if (write_pending && rd != 0)
-        write_reg(rd, pending);
+    if ((write_back || write_alu_result) && rd != 0) {
+        printf("abut to write %08x to register %d\n", write_alu_result ? alu_result : pending, rd);
+        if (write_alu_result)
+            write_reg(rd, alu_result);
+        else
+            write_reg(rd, pending);
+    }
+
     
     return true;
 }

@@ -121,6 +121,12 @@ module core(
     // for the following 3:
     //      rhs is always imm
     //      oper always ADD
+    if (opcode == 'LUI) begin
+      lhs <= 0;
+      rhs <= imm;
+      oper <= 'ADD;
+    end
+    
     if (opcode == `AUIPC) begin
         lhs <= pc_was;
         rhs <= imm;
@@ -151,9 +157,12 @@ module core(
           pc <= alu_result;
       else
           pc <= pending_pc;
-      
+
       // Update target register
-      if (write_pending && rd != 0)
+      if ((write_pending || write_alu_result) && rd != 0)
+        if (write_alu_result)
+          regs[rd] = alu_result;
+        else
           regs[rd] = pending;
       
       pstage <= 5'b00001;
