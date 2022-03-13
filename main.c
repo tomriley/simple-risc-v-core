@@ -355,6 +355,13 @@ int32_t main(int argc, char *argv[]) {
     }
     printf("ELF loading finished\n\n");
 
+    printf("Dumping memory...");
+    FILE* rom_file = fopen("rom_image.mem", "w");
+    for (int i=0; i<MEMORY_SIZE; i++) {
+        fprintf(rom_file, "%02x\n", (uint8_t) mem[i]);
+    }
+    fclose(rom_file);
+
     while (true) {
         if (!step()) {
             // ECALL signals end of test
