@@ -1,3 +1,4 @@
+A RISC-V core written in C and then in Verilog. The aim of this project is to progressively learn more about the RISC-V ISA, learn Verilog and HDL in general, and more about how CPUs are implemented in hardware.
 
 Dependencies
 ------------
@@ -8,32 +9,43 @@ In the project root, download and compile the riscv-test:
     $ cd riscv-tests
     $ git submodule update --init --recursive
     $ autoconf
-    $ ./configure --prefix=$RISCV/target
+    $ ./configure
     $ make
 
-Compiling
----------
+Compile & run tests
+-------------------
 
     $ make
+    $ make test
 
-Running a single test
----------------------
+Run a single test
+-----------------
 
     $ ./riscv-core riscv-tests/isa/rv32ui-p-add
 
-Example output:
+Compile & run tests (Verilog)
+----------------------------
 
+    $ cd verilog
+    $ make
+    $ make test
+
+Running a single test (Verilog)
+------------------------------
+
+    $ cd verilog
+    $ vvp -n core_tb +ROM=tests/rv32ui-p-add.hex
+
+Output will look similar to the C version. The -n flag will cause vvp to exit with a non-zero exit code if the test fails (rather than drop into the interactive mode).
+
+To-do
+-----
+
+* Finish implementing memory interface in Verilog
+
+Example output
+--------------
 <img src="docs/run-single.png" width="600" />
-
-
-Running all rv32ui-p tests
---------------------------
-
-    $ ./test-rv32ui-p.rb
-
-Example output:
-
-<img src="docs/test-rv32ui-p.png" width="600" />
 
 
 Reference
