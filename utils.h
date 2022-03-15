@@ -5,9 +5,25 @@
 
 const char* as_binary_str(uint32_t value, int len);
 
+// static inline unsigned short bswap_16(unsigned short x) {
+//     return (x>>8) | (x<<8);
+// }
+
+// static inline unsigned int bswap_32(unsigned int x) {
+//     return (bswap_16(x&0xffff)<<16) | (bswap_16(x>>16));
+// }
+
 // Decoding and sign extending macros
 #define BITS(value, start, end) \
     ((uint32_t) ((value >> start) & ((0x1 << (end - start + 1)) - 1)))
+
+static inline int32_t sign_extend(uint32_t value, const int width) {
+    if (value & (0x1 << (width - 1))) {
+        return value | (INT32_MIN >> (32 - width));
+    } else {
+        return value;
+    }
+}
 
 #define RESET   "\033[0m"
 #define BLACK   "\033[30m"      /* Black */

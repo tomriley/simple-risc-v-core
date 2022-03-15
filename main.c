@@ -4,24 +4,24 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <libgen.h>
 #include "main.h"
 #include "utils.h"
 #include "libelf/elf.h"
+
+#define MEMORY_SIZE 65536
+#define BASE_ADDR 0x80000000
 
 int8_t*  mem = NULL;
 uint32_t pc = 0;
 int32_t  _regfile[32] = { 0 };
 
+// future command line option flags
+bool flag_dump_regs_each_step = false;
+bool flag_dump_initial_mem = true;
+
 void dump_regs();
 void panic(const char *fmt, ...);
-
-int32_t sign_extend(uint32_t value, const int width) {
-    if (value & (0x1 << (width - 1))) {
-        return value | (INT32_MIN >> (32 - width));
-    } else {
-        return value;
-    }
-}
 
 void write_pc(uint32_t value) {
     if (value & 0x3)
@@ -110,11 +110,15 @@ int32_t alu(int32_t x, int32_t y, uint32_t operator, bool alt) {
 // RISC-V instruction pipeline
 //
 bool step() {
+    if (pc == 0) return false;
+
     // FETCH
     uint32_t idata = mem_load_int32_t(pc);
     
-    dump_regs();
-    printf("idata: %s  0x%08x  " GREEN "PC: %08x\n" RESET, as_binary_str(idata, 32), idata, pc);
+    if (flag_dump_regs_each_step)
+        dump_regs();
+    
+    printf(GREEN "PC: %08x" RESET " %08x %s \n", pc, idata, as_binary_str(idata, 32));
 
     // DECODE
     uint8_t opcode = BITS(idata, 0, 6);
@@ -164,7 +168,7 @@ bool step() {
     int32_t rs2v = read_reg(rs2);
     int32_t pc_was = pc;
 
-    printf("opcode: %s rd: %d rs1: %d (v %d) rs2: %d (v %d) funct3: %d  u_imm: 0x%08x\n", as_binary_str(opcode, 7), rd, rs1, rs1v, rs2, rs2v, funct3, u_imm);
+    //printf("opcode: %s rd: %d rs1: %d (v %d) rs2: %d (v %d) funct3: %d  i_imm: 0x%08x\n", as_binary_str(opcode, 7), rd, rs1, rs1v, rs2, rs2v, funct3, i_imm);
 
     // values that will be written back to regs
     int32_t pending_pc = pc + 4;
@@ -173,9 +177,9 @@ bool step() {
     // flags
     bool write_back = // write back pending to rd
         opcode == JAL ||
-        opcode == JALR;
+        opcode == JALR ||
+        opcode == LOAD;
     bool write_alu_result = // write the API result back to rd
-        opcode == LOAD ||
         opcode == OP ||
         opcode == OP_IM ||
         opcode == LUI ||
@@ -205,9 +209,12 @@ bool step() {
     }
 
     if (opcode == JALR) {
+        // The target address is obtained by adding the sign-extended 12-bit I-immediate
+        // to the register rs1, then setting the least-significant bit of the result to zero.
         pending = pending_pc; // old target pc
         lhs = rs1v;
         rhs = i_imm;
+        printf("JALR: rs1v is %d, imm is %d, jump target will be %d\n", rs1v, i_imm, rs1v+i_imm);
         oper = ADD;
     }
 
@@ -219,6 +226,7 @@ bool step() {
     }
 
     bool branch_result = branch(rs1v, rs2v, funct3);
+    //printf("%d %s %d = %d\n", rs1v, as_binary_str(funct3, 3), rs2v, branch_result);
     int32_t alu_result = alu(lhs, rhs, oper, alt);
     
     // Memory load/store
@@ -292,13 +300,14 @@ bool step() {
                     break;
                 #endif
                 case ECALL: // EBREAK
+                    fprintf(stdout, RED "ECALL %d\n" RESET, i_imm); 
                     switch (i_imm) {
                         case 1:
                             panic("EBREAK");
                         case 0:
                             return false; // signal ECALL
-                        default:
-                            fprintf(stdout, RED "unexpected ECALL/EBREAK immediate: %s\n" RESET, as_binary_str(i_imm, 12));
+                        //default:
+                        //fprintf(stdout, RED "unexpected ECALL/EBREAK immediate: %s\n" RESET, as_binary_str(i_imm, 12));
                     }
                     break;
                 default:
@@ -325,14 +334,13 @@ bool step() {
     
     // Update target register
     if ((write_back || write_alu_result) && rd != 0) {
-        printf("abut to write %08x to register %d\n", write_alu_result ? alu_result : pending, rd);
+        //printf("abut to write %08x to register %d\n", write_alu_result ? alu_result : pending, rd);
         if (write_alu_result)
             write_reg(rd, alu_result);
         else
             write_reg(rd, pending);
     }
 
-    
     return true;
 }
 
@@ -351,8 +359,14 @@ int32_t main(int argc, char *argv[]) {
     setbuf(stderr, NULL);
     mem = malloc(MEMORY_SIZE);
 
+    if (f == NULL) {
+        fprintf(stderr, "Couldn't open file %s\n", name);
+        return -1;
+    }
+
     printf("Loading ELF file %s...\n", name);
     readelf(f, &fhdr);
+    printf("Entry address is %08x (setting PC)", (uint32_t) fhdr.entry);
     write_pc(fhdr.entry);
     char* section_name = NULL;
 
@@ -360,32 +374,43 @@ int32_t main(int argc, char *argv[]) {
     for (int i = 0; i < fhdr.shnum; i++) {
         uint8_t* data = readelfsectioni(f, i, &section_name, &size, &fhdr);
         if (data == NULL) continue;
+        printf("\tSection \"%s\"... ", section_name);
         if (fhdr.flags & 0x2) { // SHF_ALLOC
-            printf("\tSection \"%s\" loaded (%llu bytes to 0x%08x)\n", section_name, size, (uint32_t) fhdr.addr);
-            memcpy(mem + fhdr.addr - 0x80000000, data, fhdr.size);
+            printf("loaded (%llu bytes to 0x%08x)", section_name, size, (uint32_t) fhdr.addr);
+            memcpy(mem + (fhdr.addr - BASE_ADDR), data, fhdr.size);
         }
+        printf("\n");
     }
     printf("ELF loading finished\n\n");
 
-    printf("Dumping memory...\n");
-    FILE* rom_file = fopen("rom_image.mem", "w");
-    for (int i=0; i<MEMORY_SIZE; i++) {
-        fprintf(rom_file, "%02x\n", (uint8_t) mem[i]);
+    if (flag_dump_initial_mem) {
+        char hex_file[256];
+        sprintf(hex_file, "verilog/tests/%s.hex", basename(name));
+        printf("Dumping memory to %s\n", hex_file);
+        FILE* rom_file = fopen(hex_file, "w");
+        for (int i=0; i<(MEMORY_SIZE>>2); i++) {
+            fprintf(rom_file, "%08x\n", (((uint32_t*) mem)[i]));
+        }
+        fclose(rom_file);
+        printf("Done\n");
     }
-    fclose(rom_file);
-    printf("Done\n");
 
     while (true) {
         if (!step()) {
-            // ECALL signals end of test
-            if (read_reg(10)) {
-                int test_num = read_reg(10) >> 1;
-                dump_regs();
-                fprintf(stderr, CYAN "  Test %d failed\n" RESET, test_num);
-                exit(-1);
-            } else {
-                printf(GREEN "Success!\n" RESET);
+            if (pc == 0) {
+                printf(MAGENTA "Execution stopped because PC is now zero.\n" RESET);
                 exit(0);
+            } else {
+                // ECALL signals end of test
+                if (read_reg(10)) {
+                    int test_num = read_reg(10) >> 1;
+                    dump_regs();
+                    fprintf(stderr, CYAN "  Test %d failed\n" RESET, test_num);
+                    exit(-1);
+                } else {
+                    printf(GREEN "Success!\n" RESET);
+                    exit(0);
+                }
             }
         }
     }

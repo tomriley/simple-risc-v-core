@@ -13,5 +13,8 @@ clean:
 test: riscv-core
 	./test-rv32ui-p.rb
 
+test-add: riscv-core
+	./riscv-core riscv-tests/isa/rv32ui-p-add
+
 deps:
 	@if [ ! -d libelf ]; then git clone -q https://github.com/tomriley/libelf; cd libelf; make; cd libbele; make; fi

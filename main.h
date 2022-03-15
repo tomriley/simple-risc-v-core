@@ -1,7 +1,4 @@
 
-#define MEMORY_SIZE 65536
-#define BASE_ADDR 0x80000000
-
 #define LUI     0b0110111
 #define AUIPC   0b0010111
 #define BRANCH 0b1100011
