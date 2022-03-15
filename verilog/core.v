@@ -1,24 +1,21 @@
 `include "decoder.v"
 `include "alu.v"
+`include "branch.v"
+`include "memory.v"
 
 module core(
   input clk,
-  input reset,
-  
-  output reg [31:0] raddr, // read addr bus
-  output reg rsel, // raise to say we want to read addr
-  input din, // data is ready
-  input[31:0] rdata // test idataruction at the moment
+  input rst
 );
+  // CPU state
   reg[31:0] pc;
-  reg[31:0] regs[0:31];
-  reg[31:0] idata;
-  reg[7:0] mem[65536];
+  reg[31:0] regs[31];
 
+  // prefetched register values
   reg[31:0] rs1v;
   reg[31:0] rs2v;
 
-  // intermediate state
+  // execution/control state
   // flags
   reg write_pending;
   reg write_alu_result;
@@ -28,27 +25,44 @@ module core(
   reg[31:0] pc_was;
   reg[31:0] pending_pc;
   
-  // alu inputs
-  reg[31:0] lhs;
-  reg[31:0] rhs;
-  reg[2:0] oper;
-  reg alt;
+  // current instruction data
+  reg[31:0] idata;
+
+  // memory
+  reg[2:0] width;
+  wire[31:0] rdata;
   
-  // decode results
+  // decoder output
   wire[31:0] imm;
   wire[6:0] opcode;
   wire[2:0] funct3;
   wire[6:0] funct7;
   wire[4:0] rd;
+
+  // ALU input data
+  reg[31:0] lhs;
+  reg[31:0] rhs;
+  reg[2:0] oper;
+  reg alt;
   
-  // alu output
+  // ALU output
   wire[31:0] alu_result;
+
+  // branch output
+  wire branch_result;
 
   // pipeline stage
   reg[4:0] pstage;
 
+  memory m(
+    .clk(clk),
+    .width(width),
+    .addr(imm + rs1v),
+    .rdata(rdata)
+  );
+
   decoder decoder(
-    //.clk(clk),
+    .clk(clk),
     .inst(idata),
     .imm(imm),
     .opcode(opcode),
@@ -66,24 +80,26 @@ module core(
     .result(alu_result)
   );
 
-  initial begin
-    $display("Loading rom...");
-    $readmemh("rom_image.mem", mem);
-  end
+  branch branch(
+    .clk(clk),
+    .x(rs1v),
+    .y(rs2v),
+    .operator(funct3),
+    .taken(branch_result)
+  );
  
   always @ (posedge clk) begin
     
-    if (reset) begin
-      $display(" RESET");
-      pc <= 0;
+    if (rst) begin
+      $display("rst pin is high");
+      pc <= 32'h80000000;
       regs[0] <= 0;
       pstage <= 1;
     end else begin
-      // else advance stages
       pstage <= pstage << 1;
     end
     
-    idata <= {mem[pc+3], mem[pc+2], mem[pc+1], mem[pc]};
+    idata <= m.mem[pc[30:2]]; // subtracting base addr and divide by 4
     
     alt <= funct7 == 7'b0100000 && (
         opcode == `OP && funct3 == `SUB ||
@@ -101,10 +117,10 @@ module core(
     
     // flags
     write_pending <= // pending should be written back to rd
+        opcode == `LOAD ||
         opcode == `JAL ||
         opcode == `JALR;
     write_alu_result <= // result of apu should be written back to rd
-        opcode == `LOAD ||
         opcode == `OP ||
         opcode == `OP_IM ||
         opcode == `LUI ||
@@ -117,14 +133,13 @@ module core(
     rhs <= opcode == `OP ? rs2v : imm;
     oper <= funct3;
 
-
     // for the following 3:
     //      rhs is always imm
     //      oper always ADD
-    if (opcode == 'LUI) begin
+    if (opcode == `LUI) begin
       lhs <= 0;
       rhs <= imm;
-      oper <= 'ADD;
+      oper <= `ADD;
     end
     
     if (opcode == `AUIPC) begin
@@ -147,10 +162,53 @@ module core(
         oper <= `ADD;
     end
 
-    // memory access stage TODO
+    case (opcode)
+      `LOAD: begin
+        case (funct3)
+          `LW: begin
+            width <= 4;
+          end
+        endcase
+      end
 
-    // SYSTEM opcodes TODO
-    
+      `FENCE: ;
+      `BRANCH: begin
+        if (branch_result) 
+          pending_pc = pc_was + imm;
+      end
+      
+      `SYSTEM: begin
+        case (funct3)
+          `ECALL: begin
+            case (imm)
+              1'b1: begin
+                $display("panic: EBREAK");
+                $stop();
+              end
+              1'b0: begin
+                $display("ECALL finishing");
+                if (regs[10]) begin
+                  $display("  Test %d failed", regs[10] >> 1);
+                  $stop();
+                end else begin
+                  $display("Success!");
+                  $finish();
+                end
+              end
+              //default: $display("unexpected ECALL/EBREAK immediate %b", imm);
+            endcase
+          end
+        endcase
+      end
+    endcase
+  
+    if (pstage == 5'b01000) begin
+      if (opcode == `LOAD) begin
+        $display("rdata is %h", rdata);
+        pending <= rdata;
+      end
+    end
+
     if (pstage == 5'b10000) begin
       // Update PC
       if (alu_result_is_new_pc)

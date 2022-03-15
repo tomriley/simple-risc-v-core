@@ -35,6 +35,7 @@ Example output:
 
 <img src="docs/test-rv32ui-p.png" width="600" />
 
+
 Reference
 ---------
 
@@ -44,5 +45,5 @@ Reference
 Dependencies
 ------------
 
-* [riscv-tests](https://github.com/riscv-software-src/riscv-tests)
-* https://github.com/0intro/libelf ([forked](https://github.com/tomriley/libelf))
+* RISC-V tests: https://github.com/riscv-software-src/riscv-tests
+* Simple ELF loading library: https://github.com/0intro/libelf ([forked](https://github.com/tomriley/libelf))

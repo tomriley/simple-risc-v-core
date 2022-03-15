@@ -1,7 +1,7 @@
 `include "opcodes.v"
 
 module decoder(
-  //input clk,
+  input clk,
   input[31:0] inst,
   output reg [6:0] opcode,
   output reg [31:0] imm,  // immediate
@@ -25,7 +25,7 @@ module decoder(
   wire[31:0] u_imm = { inst[31:12], {12{1'b0}} }; // 19
   wire[31:0] s_imm = { {20{inst[31]}}, inst[31:25], inst[11:7] }; // 5+7 = 
   
-  always @ (inst) begin
+  always @ (posedge clk) begin
     if (opcode == `LOAD || opcode == `OP || opcode == `OP_IM || opcode == `JALR || opcode == `SYSTEM)
       imm = i_imm;
     else if (opcode == `BRANCH)

@@ -9,11 +9,8 @@ module alu(
 );
   always @ (/*lhs or rhs or func or alt*/ posedge clk) begin
     case (func)
-      `ADD: begin
-        //$display("performing an ADD %d + %d", lhs, rhs);
-        result <= alt ? lhs - rhs : lhs + rhs; // need to deal with subtracting alt case
-      end
-      `SLL: result <= lhs << (rhs & 5'b11111);
+      `ADD: result <= alt ? lhs - rhs : lhs + rhs; // need to deal with subtracting alt case
+      `SLL: result <= $unsigned(lhs) << (rhs & 5'b11111);
       `SLT: result <= (lhs < rhs ? 1 : 0); // signed
       `SLTU: result <= $unsigned(lhs) < $unsigned(rhs) ? 1 : 0;
       `XOR: result <= lhs ^ rhs;
