@@ -18,11 +18,12 @@ module core_tb;
   end
 
   always @ (posedge clk) begin
-    for (integer row = 0; row < 8; row++) begin
-      //$display("x%d: %h x%d: %h x%d: %h x%d: %h", row*4, core.regs[row*4], row*4+1, core.regs[row*4+1], row*4+2, core.regs[row*4+2], row*4+3, core.regs[row*4+3]);  
-    end
-    if (core.pstage == 2'b10) // after decode
+    if (core.pstage == 2'b10) begin // after decode
+      for (integer row = 0; row < 8; row++) begin
+        $display("%d: %h %d: %h %d: %h %d: %h", row*4, core.regs[row*4], row*4+1, core.regs[row*4+1], row*4+2, core.regs[row*4+2], row*4+3, core.regs[row*4+3]);  
+      end
       $display("PC: %h %h %b %b", core.pc, core.idata, core.idata, core.opcode);
+    end
   end
 
   initial begin

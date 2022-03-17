@@ -4,7 +4,7 @@ module decoder(
   input clk,
   input[31:0] inst,
   output reg [6:0] opcode,
-  output reg [31:0] imm,  // immediate
+  output reg [31:0] imm,
   output reg [4:0] rs1,
   output reg [4:0] rs2,
   output reg [4:0] rd,
@@ -17,13 +17,12 @@ module decoder(
   assign rs1 = inst[19:15];
   assign rs2 = inst[24:20];
   assign funct7 = inst[31:25];
-    
-  // all immediate types
-  wire[31:0] i_imm = { {20{inst[31]}}, inst[31:20] }; // 12
-  wire[31:0] b_imm = { {19{inst[31]}}, inst[31], inst[7:7], inst[30:25], inst[11:8], 1'b0 }; // 1+4+6+1+1
-  wire[31:0] j_imm = { {12{inst[31]}}, inst[19:12], inst[20], inst[30:21], 1'b0 }; // 1+10+1+8
-  wire[31:0] u_imm = { inst[31:12], {12{1'b0}} }; // 19
-  wire[31:0] s_imm = { {20{inst[31]}}, inst[31:25], inst[11:7] }; // 5+7 = 
+
+  wire[31:0] i_imm = { {20{inst[31]}}, inst[31:20] };
+  wire[31:0] b_imm = { {19{inst[31]}}, inst[31], inst[7:7], inst[30:25], inst[11:8], 1'b0 };
+  wire[31:0] j_imm = { {12{inst[31]}}, inst[19:12], inst[20], inst[30:21], 1'b0 };
+  wire[31:0] u_imm = { inst[31:12], {12{1'b0}} };
+  wire[31:0] s_imm = { {20{inst[31]}}, inst[31:25], inst[11:7] };
   
   always @ (posedge clk) begin
     if (opcode == `LOAD || opcode == `OP || opcode == `OP_IM || opcode == `JALR || opcode == `SYSTEM)

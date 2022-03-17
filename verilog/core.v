@@ -29,7 +29,7 @@ module core(
   reg[31:0] idata;
 
   // memory
-  reg[2:0] width;
+  //reg[2:0] width;
   wire[31:0] rdata;
   
   // decoder output
@@ -56,7 +56,7 @@ module core(
 
   memory m(
     .clk(clk),
-    .width(width),
+    .func(funct3),
     .addr(imm + rs1v),
     .rdata(rdata)
   );
@@ -166,7 +166,13 @@ module core(
       `LOAD: begin
         case (funct3)
           `LW: begin
-            width <= 4;
+            //width <= 4;
+          end
+          `LH: begin
+            //width <= 2;
+          end
+          `LB: begin
+            //width <= 1;
           end
         endcase
       end

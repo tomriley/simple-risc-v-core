@@ -17,7 +17,7 @@ uint32_t pc = 0;
 int32_t  _regfile[32] = { 0 };
 
 // future command line option flags
-bool flag_dump_regs_each_step = false;
+bool flag_dump_regs_each_step = true;
 bool flag_dump_initial_mem = true;
 
 void dump_regs();
@@ -85,8 +85,9 @@ bool branch(int32_t x, int32_t y, int32_t operator) {
         case BEQ: return x == y;
         case BNE: return x != y;
         case BLT: return x < y;
-        case BLTU: return ((uint32_t) x) < ((uint32_t) y);
         case BGE: return x >= y;
+        // unsigned comparison
+        case BLTU: return ((uint32_t) x) < ((uint32_t) y);
         case BGEU: return ((uint32_t) x) >= ((uint32_t) y);
         default: return false;
     }
@@ -94,14 +95,19 @@ bool branch(int32_t x, int32_t y, int32_t operator) {
 
 int32_t alu(int32_t x, int32_t y, uint32_t operator, bool alt) {
     switch (operator) {
+        // arithmetic (LUI and AUIPC are implemented as ADD)
         case ADD: return alt ? x - y : x + y;
+        // shifts
         case SLL: return ((uint32_t) x) << (y & 0x1F);
+        case SRL: return alt ? x >> (y & 0x1F) : ((uint32_t) x) >> (y & 0x1F);
+        // logical
+        case AND: return x & y;
+        case OR: return x | y;
+        case XOR: return x ^ y;
+        // compare
         case SLT: return x < y ? 1 : 0;
         case SLTU: return ((uint32_t) x) < ((uint32_t) y) ? 1 : 0;
-        case XOR: return x ^ y;
-        case SRL: return alt ? x >> (y & 0x1F) : ((uint32_t) x) >> (y & 0x1F);
-        case OR: return x | y;
-        case AND: return x & y;
+
         default: panic("unknown arith operator %d", operator); return 0;
     }
 }
@@ -376,7 +382,7 @@ int32_t main(int argc, char *argv[]) {
         if (data == NULL) continue;
         printf("\tSection \"%s\"... ", section_name);
         if (fhdr.flags & 0x2) { // SHF_ALLOC
-            printf("loaded (%llu bytes to 0x%08x)", section_name, size, (uint32_t) fhdr.addr);
+            printf("loaded (%llu bytes to 0x%08x)", size, (uint32_t) fhdr.addr);
             memcpy(mem + (fhdr.addr - BASE_ADDR), data, fhdr.size);
         }
         printf("\n");
