@@ -31,6 +31,7 @@ module core(
   // memory
   //reg[2:0] width;
   wire[31:0] rdata;
+  reg rw;
   
   // decoder output
   wire[31:0] imm;
@@ -58,7 +59,9 @@ module core(
     .clk(clk),
     .func(funct3),
     .addr(imm + rs1v),
-    .rdata(rdata)
+    .rdata(rdata),
+    .wdata(rs2v),
+    .rw(rw)
   );
 
   decoder decoder(
@@ -163,21 +166,9 @@ module core(
     end
 
     case (opcode)
-      `LOAD: begin
-        case (funct3)
-          `LW: begin
-            //width <= 4;
-          end
-          `LH: begin
-            //width <= 2;
-          end
-          `LB: begin
-            //width <= 1;
-          end
-        endcase
-      end
-
       `FENCE: ;
+      `LOAD: ;
+
       `BRANCH: begin
         if (branch_result) 
           pending_pc = pc_was + imm;
@@ -207,15 +198,27 @@ module core(
         endcase
       end
     endcase
+
+    if (pstage == 5'b00100) begin
+      if (opcode == `STORE) begin
+        $display("setting rw to 1");
+        rw <= 1;
+      end
+    end
   
     if (pstage == 5'b01000) begin
       if (opcode == `LOAD) begin
         $display("rdata is %h", rdata);
         pending <= rdata;
       end
+      if (opcode == `STORE) begin
+        $display("setting rw to 0");
+        rw <= 0;
+      end
     end
 
     if (pstage == 5'b10000) begin
+      $display("Write back stage");
       // Update PC
       if (alu_result_is_new_pc)
           pc <= alu_result;
