@@ -17,8 +17,8 @@ uint32_t pc = 0;
 int32_t  _regfile[32] = { 0 };
 
 // future command line option flags
-bool flag_dump_regs_each_step = true;
-bool flag_dump_initial_mem = true;
+bool flag_dump_regs_each_step = false;
+bool flag_dump_initial_mem = false;
 
 void dump_regs();
 void panic(const char *fmt, ...);
@@ -350,6 +350,15 @@ bool step() {
     return true;
 }
 
+bool has_command_line_flag(const char* flag, int argc, char *argv[]) {
+    for (int i = 0; i < argc; ++i) {
+        if (strcmp(argv[i], flag) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 //
 // Load the ELF file specified as the sole commenad argument, set PC to entry
 // point then run our simulation pipeline until an ECALL instruction causes step()
@@ -363,6 +372,10 @@ int32_t main(int argc, char *argv[]) {
 
     setbuf(stdout, NULL);
     setbuf(stderr, NULL);
+
+    flag_dump_regs_each_step = has_command_line_flag("-r", argc, argv);
+    flag_dump_initial_mem = has_command_line_flag("-h", argc, argv);
+
     mem = malloc(MEMORY_SIZE);
 
     if (f == NULL) {
