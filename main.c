@@ -9,7 +9,7 @@
 #include "utils.h"
 #include "libelf/elf.h"
 
-#define MEMORY_SIZE 65536
+#define MEMORY_SIZE 32000000
 #define BASE_ADDR 0x80000000
 
 int8_t*  mem = NULL;
@@ -155,10 +155,10 @@ bool step() {
 
     // J-Type
     int32_t j_imm = sign_extend(
-        BITS(idata, 21, 30) << 1 |
+        BITS(idata, 31, 31) << 20 |
+        BITS(idata, 12, 19) << 12 |
         BITS(idata, 20, 20) << 11 |
-        BITS(idata, 12, 19) << 19 |
-        BITS(idata, 31, 31) << 20,
+        BITS(idata, 21, 30) << 1,
         21
     );
     
@@ -220,7 +220,7 @@ bool step() {
         pending = pending_pc; // old target pc
         lhs = rs1v;
         rhs = i_imm;
-        printf("JALR: rs1v is %d, imm is %d, jump target will be %d\n", rs1v, i_imm, rs1v+i_imm);
+        printf("JALR: rs1v is 0x%08x, imm is %d, jump target will be 0x%08x\n", rs1v, i_imm, rs1v+i_imm);
         oper = ADD;
     }
 
@@ -228,6 +228,7 @@ bool step() {
         pending = pending_pc; // old target pc
         lhs =  pc_was;
         rhs = j_imm;
+        printf("JAL: pc_was is 0x%08x, imm is %d, jump target will be 0x%08x\n", pc_was, j_imm, pc_was+j_imm);
         oper = ADD;
     }
 
