@@ -9,7 +9,7 @@
 #include "utils.h"
 #include "libelf/elf.h"
 
-#define MEMORY_SIZE 32000000
+#define MEMORY_SIZE (0x00400000) // 4MB
 #define BASE_ADDR 0x80000000
 
 int8_t*  mem = NULL;
@@ -55,14 +55,15 @@ void write_csr(int index, int32_t value) {
 #endif
 
 #define MEM_BOUNDS_CHECK(addr, type) \
-     if (addr > MEMORY_SIZE - sizeof(type) || addr < 0) \
-        panic("memory address 0x%08x out of bounds for type " #type, addr);
+     if (addr > (MEMORY_SIZE - sizeof(type)) || addr < 0) \
+        panic("memory address 0x%08x out of bounds for type, mem size is 0x%08x" #type, addr, MEMORY_SIZE- sizeof(type));
 
 // Define memory store methods
 #define STORE_MEM_FUNC(type) \
     void mem_store_##type(uint32_t addr, type data) { \
         addr -= BASE_ADDR; \
         MEM_BOUNDS_CHECK(addr, type); \
+        if (addr == 0x00100000) putc((char) data, stdout); \
         *(type*)(mem + addr) = data; \
     }
 STORE_MEM_FUNC(int8_t);
@@ -121,10 +122,10 @@ bool step() {
     // FETCH
     uint32_t idata = mem_load_int32_t(pc);
     
-    if (flag_dump_regs_each_step)
+    if (flag_dump_regs_each_step) {
         dump_regs();
-    
-    printf(GREEN "PC: %08x" RESET " %08x %s \n", pc, idata, as_binary_str(idata, 32));
+        printf(GREEN "PC: %08x" RESET " %08x %s \n", pc, idata, as_binary_str(idata, 32));
+    }
 
     // DECODE
     uint8_t opcode = BITS(idata, 0, 6);
@@ -220,7 +221,7 @@ bool step() {
         pending = pending_pc; // old target pc
         lhs = rs1v;
         rhs = i_imm;
-        printf("JALR: rs1v is 0x%08x, imm is %d, jump target will be 0x%08x\n", rs1v, i_imm, rs1v+i_imm);
+        //printf("JALR: rs1v is 0x%08x, imm is %d, jump target will be 0x%08x\n", rs1v, i_imm, rs1v+i_imm);
         oper = ADD;
     }
 
@@ -228,7 +229,7 @@ bool step() {
         pending = pending_pc; // old target pc
         lhs =  pc_was;
         rhs = j_imm;
-        printf("JAL: pc_was is 0x%08x, imm is %d, jump target will be 0x%08x\n", pc_was, j_imm, pc_was+j_imm);
+        //printf("JAL: pc_was is 0x%08x, imm is %d, jump target will be 0x%08x\n", pc_was, j_imm, pc_was+j_imm);
         oper = ADD;
     }
 
@@ -412,7 +413,8 @@ int32_t main(int argc, char *argv[]) {
             fprintf(rom_file, "%08x\n", (((uint32_t*) mem)[i]));
         }
         fclose(rom_file);
-        printf("Done\n");
+        printf("Done. Exiting.\n");
+        exit(0);
     }
 
     while (true) {

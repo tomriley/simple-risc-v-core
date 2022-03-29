@@ -8,7 +8,7 @@ module memory(
   output reg [31:0] rdata
 );
   // memory of 32 bit words
-  reg[31:0] mem[0:(65536>>2)-1];
+  reg[31:0] mem[0:32'h00400000>>2];
   wire[31:0] data;
   assign data = mem[addr[30:2]]; // continuous assignment to word
   

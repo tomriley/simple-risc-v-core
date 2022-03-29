@@ -34,6 +34,7 @@ module core_tb;
     #25 rst = 0;
     
     #200000; // sim time
+    $display("Simulation time finished");
     $finish(); // now exit
   end
 endmodule

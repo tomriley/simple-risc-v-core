@@ -1,0 +1,11 @@
+[package]
+name = "simple"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+panic-halt = "0.2.0"
+riscv-rt = "0.8.1"
+
+[profile.release]
+opt-level = 0
